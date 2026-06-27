@@ -94,21 +94,35 @@ requirements.txt    ← dependencias Python
 ## Base de Datos — Esquema Principal
 
 ```sql
--- Pescadores registrados
-users (id, phone_number, name, location, created_at, active)
+-- Sensores IoT registrados (ESP32)
+sensors (id uuid PK, device_id varchar UNIQUE, api_key_hash varchar,
+         location varchar, active bool, last_seen timestamptz, created_at timestamptz)
 
--- Conversaciones WhatsApp
-conversations (id, user_id, wa_message_id, direction, content, timestamp)
+-- Lecturas puntuales de sensores
+sensor_readings (id uuid PK, sensor_id uuid FK→sensors, timestamp timestamptz,
+                 ph float, conductivity_mscm float, temperature_c float,
+                 water_level_cm float, created_at timestamptz)
 
--- Lecturas de sensores
-sensor_readings (id, sensor_id, ph, conductivity, temperature, timestamp, location_lat, location_lon)
+-- Snapshots meteorológicos (Open-Meteo)
+weather_snapshots (id uuid PK, source varchar DEFAULT 'open-meteo',
+                   timestamp timestamptz, temperature_c float,
+                   wind_speed_kmh float, wind_direction_deg float,
+                   precipitation_mm float, created_at timestamptz)
 
--- Sensores registrados
-sensors (id, device_id, api_key_hash, location, active, last_seen)
+-- Datos satelitales diarios (NASA ERDDAP / Copernicus)
+satellite_data (id uuid PK, source varchar, date date,
+                sst_celsius float, chlorophyll_mgm3 float, created_at timestamptz)
 
--- Alertas generadas
-alerts (id, sensor_id, type, value, threshold, notified_users, created_at)
+-- Alertas de fuentes externas (NOAA NHC, IDEAM)
+external_alerts (id uuid PK, source varchar, alert_type varchar,
+                 title text, description text, fetched_at timestamptz)
+
+-- Semáforo diario cacheado (ranking IPP por zona)
+daily_semaphore (id uuid PK, date date UNIQUE, color varchar,
+                 reason text, ipp_ranking jsonb, created_at timestamptz)
 ```
+
+> **Nota:** Las tablas `users` y `conversations` (historial WhatsApp) están pendientes de implementar — ver flujo WhatsApp arriba.
 
 ## Seguridad
 
