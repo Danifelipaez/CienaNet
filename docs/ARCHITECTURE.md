@@ -57,7 +57,7 @@
 2. Meta → POST /webhook/whatsapp con payload JSON
 3. FastAPI valida firma HMAC (X-Hub-Signature-256)
 4. MessageRouter identifica tipo: texto / audio / imagen / botón
-5. Se procesa intención (NLU básico o Claude API)
+5. Se procesa intención (NLU básico o proveedor de IA via AIProvider)
 6. Se consulta DB para historial y datos de sensores recientes
 7. Se construye respuesta (texto + botones interactivos si aplica)
 8. FastAPI → Meta API → WhatsApp → pescador

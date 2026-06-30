@@ -58,11 +58,13 @@ PR abierto  → Tests en GitHub Actions → Preview deploy
 - **Protocolo hacia API:** HTTP POST con JSON + API key en header
 - **Firmware:** Arduino IDE / PlatformIO
 
-### IA / NLU: Claude API (Anthropic)
+### IA / NLU: proveedor agnóstico
 Para procesar mensajes de texto libre en WhatsApp:
-- Modelo: `claude-haiku-4-5-20251001` (bajo costo, rápido)
 - Uso: clasificar intención del pescador, generar respuestas naturales
-- Fallback: respuestas predefinidas si API no disponible
+- Fallback: respuestas predefinidas si no hay proveedor configurado
+- La interfaz está en `app/services/ai_service.py` (`AIProvider` Protocol)
+- El proveedor concreto se elige en `get_ai_provider()` sin tocar el resto del código
+- Candidatos: Groq (Llama, bajo costo), OpenAI, modelos locales vía Ollama, cualquier API compatible
 
 ## Versiones Específicas
 
@@ -80,7 +82,7 @@ alembic             >= 1.13
 supabase            >= 2.9
 httpx               >= 0.27   # cliente HTTP async para Meta API
 python-dotenv       >= 1.0
-anthropic           >= 0.40   # Claude API
+# Sin SDK de IA fijo — el proveedor se conecta en ai_service.py
 pytest              >= 8.0
 pytest-asyncio      >= 0.24
 ```
@@ -102,8 +104,8 @@ WHATSAPP_PHONE_NUMBER_ID= # ID del número registrado en Meta
 WHATSAPP_VERIFY_TOKEN=    # Token para verificación de webhook
 WHATSAPP_APP_SECRET=      # Para validación HMAC de webhooks
 
-# Claude API
-ANTHROPIC_API_KEY=
+# IA / NLU (proveedor a definir)
+AI_API_KEY=
 
 # App
 ENVIRONMENT=              # development | staging | production

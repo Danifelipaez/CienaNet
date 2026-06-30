@@ -64,7 +64,7 @@ Antes de hacer commit de código generado por IA, verificar:
 ```
 [ ] ¿Todos los inputs externos están validados con Pydantic?
 [ ] ¿El webhook de Meta valida la firma HMAC antes de procesar?
-[ ] ¿Hay manejo de errores para cada llamada externa (Meta API, Supabase, Claude)?
+[ ] ¿Hay manejo de errores para cada llamada externa (Meta API, Supabase, proveedor de IA)?
 [ ] ¿No hay credenciales hardcodeadas?
 [ ] ¿El código tiene type hints?
 [ ] ¿Los tests cubren el happy path Y los casos de error?

@@ -479,8 +479,8 @@ WHATSAPP_APP_SECRET=          # Para HMAC
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 
-# Claude API
-ANTHROPIC_API_KEY=
+# IA / NLU (proveedor a definir — ver app/services/ai_service.py)
+AI_API_KEY=
 
 # Copernicus Marine (opcional, para backup SST)
 COPERNICUSMARINE_SERVICE_USERNAME=
@@ -519,7 +519,7 @@ sodapy>=2.2           # IDEAM Socrata
 copernicusmarine>=1.0 # Backup Copernicus (opcional)
 sqlalchemy>=2.0
 alembic>=1.13
-anthropic>=0.40       # Reemplaza groq
+# SDK de IA: agregar el del proveedor elegido (ej: groq, openai, anthropic, etc.)
 mangum>=0.19          # Vercel
 ```
 

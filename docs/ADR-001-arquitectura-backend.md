@@ -46,7 +46,7 @@ app/
 │   ├── whatsapp_service.py    # Lógica mensajes: parsear, responder
 │   ├── sensor_service.py      # Lógica ingesta: validar, guardar, alertar
 │   ├── alert_service.py       # Evaluación de umbrales + dispatch
-│   └── ai_service.py          # Llamadas a Claude API (NLU + respuestas)
+│   └── ai_service.py          # AIProvider Protocol + get_ai_provider() (proveedor agnóstico)
 │
 ├── models/
 │   ├── user.py                # ORM: users
