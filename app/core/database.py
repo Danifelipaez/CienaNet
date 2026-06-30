@@ -20,7 +20,8 @@ class Base(DeclarativeBase):
 # pgBouncer en modo transaction no soporta prepared statements de asyncpg;
 # statement_cache_size=0 es obligatorio o las queries fallan intermitentemente.
 engine = create_async_engine(
-    settings.postgres_prisma_url.replace("postgresql://", "postgresql+asyncpg://"),
+    # ponytail: Vercel emite postgres://, SQLAlchemy requiere postgresql+asyncpg://
+    "postgresql+asyncpg://" + settings.postgres_prisma_url.split("://", 1)[1],
     connect_args={"statement_cache_size": 0},
     pool_pre_ping=True,
 )
