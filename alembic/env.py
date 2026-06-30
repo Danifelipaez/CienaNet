@@ -5,17 +5,16 @@ from sqlalchemy import pool
 
 from alembic import context
 
-from app.core.config import settings
+import os
+
 from app.core.database import Base
 import app.models.environmental  # noqa: F401  (registra las tablas en Base.metadata)
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
 config = context.config
 
-# Las migraciones usan la conexión DIRECTA (puerto 5432), no el pooler:
-# pgBouncer en modo transaction no maneja bien el DDL transaccional.
-config.set_main_option("sqlalchemy.url", settings.database_url_direct)
+# Tomar la URL de DATABASE_URL_DIRECT o POSTGRES_URL_NON_POOLING (Vercel)
+_db_url = os.environ.get("DATABASE_URL_DIRECT") or os.environ.get("POSTGRES_URL_NON_POOLING", "")
+config.set_main_option("sqlalchemy.url", _db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
