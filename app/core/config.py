@@ -6,11 +6,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Base de datos (Supabase). Dos URLs por el modelo serverless:
-    # - pooler (6543, transaction mode) para el runtime de la app
-    # - direct (5432) solo para las migraciones de Alembic
-    database_url_pooler: str
-    database_url_direct: str
+    # Base de datos (Supabase). Nombres generados por la integración Vercel-Supabase.
+    # - pooler (transaction mode) para el runtime de la app
+    # - non-pooling (direct) solo para las migraciones de Alembic
+    postgres_prisma_url: str
+    postgres_url_non_pooling: str
 
     # Supabase API
     supabase_url: str

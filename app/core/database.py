@@ -20,7 +20,7 @@ class Base(DeclarativeBase):
 # pgBouncer en modo transaction no soporta prepared statements de asyncpg;
 # statement_cache_size=0 es obligatorio o las queries fallan intermitentemente.
 engine = create_async_engine(
-    settings.database_url_pooler.replace("postgresql://", "postgresql+asyncpg://"),
+    settings.postgres_prisma_url.replace("postgresql://", "postgresql+asyncpg://"),
     connect_args={"statement_cache_size": 0},
     pool_pre_ping=True,
 )
