@@ -64,3 +64,44 @@ def rank_zones(water: dict, satellite: dict) -> list[dict]:
         for z in ZONES
     ]
     return sorted(results, key=lambda x: x["ipp"], reverse=True)
+
+
+def point_condition(ipp: float, semaphore_color: str) -> str:
+    """Condición semáforo de un punto de pesca puntual (vista Mapa).
+
+    No hay red de sensores por punto — solo varía la salinidad esperada
+    (calculate_ipp). Si el semáforo general ya es rojo (viento/lluvia/oxígeno
+    crítico), aplica a toda la ciénaga por igual; si no, cada punto se
+    colorea según qué tan bien encaja su rango de salinidad con las
+    condiciones actuales.
+    """
+    if semaphore_color == "red":
+        return "rojo"
+    if ipp >= 70:
+        return "verde"
+    if ipp >= 40:
+        return "amarillo"
+    return "rojo"
+
+
+def rank_points(
+    water: dict, satellite: dict, weather: dict, semaphore_color: str, points: list
+) -> list[dict]:
+    """Igual que rank_zones pero sobre fishing_points reales (FishingPoint ORM)."""
+    results = [
+        {
+            "id": str(p.id),
+            "nombre": p.nombre,
+            "lat": p.lat,
+            "lng": p.lng,
+            "especies": p.especies or [],
+            "observacion": p.observacion,
+            "temp": satellite.get("sst_celsius"),
+            "clorofila": satellite.get("chlorophyll_mgm3"),
+            "viento": weather.get("wind_speed_kmh"),
+            "ipp": (ipp := calculate_ipp(water, satellite, {"sal_min": p.sal_min, "sal_max": p.sal_max})),
+            "condicion": point_condition(ipp, semaphore_color),
+        }
+        for p in points
+    ]
+    return sorted(results, key=lambda x: x["ipp"], reverse=True)

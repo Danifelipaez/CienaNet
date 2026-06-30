@@ -7,22 +7,17 @@ La API key raw se muestra UNA sola vez al registrar — no se puede recuperar de
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.api.v1.dependencies import require_admin
 from app.core.database import get_db
 from app.core.security import hash_api_key
 from app.models.environmental import Sensor
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-
-def _require_admin(x_admin_key: str = Header(...)) -> None:
-    if x_admin_key != settings.admin_api_key:
-        raise HTTPException(status_code=403, detail="Admin key inválida")
 
 
 class SensorCreate(BaseModel):
@@ -48,7 +43,7 @@ class SensorInfo(BaseModel):
 async def register_sensor(
     body: SensorCreate,
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(_require_admin),
+    _: None = Depends(require_admin),
 ) -> SensorCreated:
     """Registra un nuevo sensor ESP32. Retorna la API key en texto plano (solo esta vez)."""
     existing = (
@@ -78,7 +73,7 @@ async def register_sensor(
 @router.get("/sensors", response_model=list[SensorInfo])
 async def list_sensors(
     db: AsyncSession = Depends(get_db),
-    _: None = Depends(_require_admin),
+    _: None = Depends(require_admin),
 ) -> list[SensorInfo]:
     """Lista todos los sensores registrados (sin exponer hashes de API key)."""
     rows = (await db.execute(select(Sensor).order_by(Sensor.created_at))).scalars().all()
