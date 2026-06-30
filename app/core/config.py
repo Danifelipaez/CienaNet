@@ -22,11 +22,12 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = ""
     whatsapp_app_secret: str = ""
 
-    # Claude API (Anthropic)
-    anthropic_api_key: str = ""
+    # IA / NLU — proveedor agnóstico; la implementación concreta vive en ai_service.py
+    ai_api_key: str = ""
 
     # App
     sensor_api_key_secret: str
+    admin_api_key: str = "change-me"
     environment: str = "development"
 
     # Coordenadas centro de la Ciénaga Grande (no secretos)

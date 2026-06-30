@@ -11,4 +11,5 @@ os.environ.setdefault("DATABASE_URL_DIRECT", "postgresql://u:p@localhost:5432/db
 os.environ.setdefault("SUPABASE_URL", "http://localhost")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "dummy")
 os.environ.setdefault("SENSOR_API_KEY_SECRET", "dummy-salt")
+os.environ.setdefault("ADMIN_API_KEY", "test-admin-key")
 os.environ.setdefault("WHATSAPP_APP_SECRET", "dummy-app-secret")
