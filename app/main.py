@@ -51,4 +51,4 @@ app.include_router(admin.router, prefix="/api/v1")
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": "0.1.0", "deploy": "2026-06-30"}
