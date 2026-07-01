@@ -106,6 +106,27 @@ class ExternalAlert(Base):
     )
 
 
+class SedimentationZone(Base):
+    """Zona de sedimentación (capa del mapa) — polígono + nivel de severidad.
+
+    Datos sembrados a mano vía migración (igual que fishing_points): son
+    datos, no esquema, se ajustan con un update directo o nueva migración.
+    """
+
+    __tablename__ = "sedimentation_zones"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    nombre: Mapped[str] = mapped_column(String(100))
+    polygon: Mapped[list] = mapped_column(JSONB)
+    nivel: Mapped[str] = mapped_column(String(10))  # "bajo" | "medio" | "alto"
+    observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class DailySemaphore(Base):
     """Resultado del semáforo diario cacheado (con ranking IPP por zona)."""
 

@@ -9,16 +9,26 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class AIProvider(Protocol):
-    async def complete(self, system: str, user: str) -> str:
-        """Genera una respuesta dado un prompt de sistema y uno de usuario."""
+    async def complete(self, system: str, user: str) -> dict:
+        """Genera {parrafos: [...], sugerencia} dado un prompt de sistema y uno de usuario."""
         ...
 
 
 class _StubProvider:
-    """Sin proveedor configurado: retorna string vacío sin lanzar errores."""
+    """Sin proveedor configurado: retorna un párrafo de aviso, sin lanzar errores."""
 
-    async def complete(self, system: str, user: str) -> str:
-        return ""
+    async def complete(self, system: str, user: str) -> dict:
+        return {
+            "parrafos": [
+                {
+                    "tipo": "limitaciones",
+                    "titulo": None,
+                    "html": "No hay un proveedor de IA configurado todavía.",
+                    "items": None,
+                }
+            ],
+            "sugerencia": None,
+        }
 
 
 def get_ai_provider() -> AIProvider:

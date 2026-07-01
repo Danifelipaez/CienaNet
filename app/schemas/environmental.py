@@ -66,7 +66,13 @@ class SatelliteHistoryPoint(BaseModel):
     chlorophyll_mgm3: float | None
 
 
+class CatchHistoryPoint(BaseModel):
+    date: date
+    cantidad_indice: float
+
+
 class HistoryResponse(BaseModel):
     weather: list[WeatherHistoryPoint]
     semaphore: list[SemaphoreHistoryPoint]
     satellite: list[SatelliteHistoryPoint]
+    captura: list[CatchHistoryPoint]

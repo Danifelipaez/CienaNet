@@ -2,19 +2,24 @@
 
 GET  /dashboard/points         — puntos de pesca con condición/IPP actual
 GET  /dashboard/species        — catálogo de especies (estático, ver ponytail abajo)
+GET  /dashboard/sedimentation  — zonas de sedimentación (capa del mapa)
 POST /dashboard/ai/ask         — pregunta libre al AIProvider configurado
+GET  /dashboard/ai/history     — historial de preguntas/respuestas de la vista IA
 GET  /dashboard/system-status  — estado de APIs externas + métricas del bot
 """
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import require_admin
 from app.core.database import get_db
-from app.schemas.dashboard import AskRequest, AskResponse
+from app.models.dashboard import AIConversation
+from app.schemas.dashboard import AIHistoryItem, AskRequest, AskResponse
 from app.services.ai_service import get_ai_provider
 from app.services.dashboard_service import get_latest_snapshot
 from app.services.points_service import get_points
+from app.services.sedimentation_service import get_sedimentation_zones
 from app.services.system_status_service import get_system_status
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -41,6 +46,12 @@ async def species() -> dict:
     return {"especies": _ESPECIES}
 
 
+@router.get("/sedimentation")
+async def sedimentation(db: AsyncSession = Depends(get_db)) -> dict:
+    """Zonas de sedimentación (polígonos) para la capa del mapa."""
+    return {"zonas": await get_sedimentation_zones(db)}
+
+
 @router.post("/ai/ask", response_model=AskResponse)
 async def ask_ai(
     body: AskRequest,
@@ -56,8 +67,46 @@ async def ask_ai(
         f"mg/m³, temperatura superficial {snapshot['satellite'].get('sst_celsius')} °C. "
         "Responde en español, citando los datos disponibles."
     )
-    respuesta = await get_ai_provider().complete(system=system, user=body.pregunta)
-    return AskResponse(respuesta=respuesta)
+    result = await get_ai_provider().complete(system=system, user=body.pregunta)
+
+    db.add(
+        AIConversation(
+            pregunta=body.pregunta,
+            respuesta=result["parrafos"],
+            sugerencia=result.get("sugerencia"),
+            contexto=body.contexto,
+        )
+    )
+    await db.commit()
+
+    return AskResponse(parrafos=result["parrafos"], sugerencia=result.get("sugerencia"))
+
+
+@router.get("/ai/history")
+async def ai_history(
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+) -> dict:
+    """Historial de preguntas/respuestas de la vista 'Pregunta a la IA' (más reciente primero)."""
+    rows = (
+        await db.execute(
+            select(AIConversation).order_by(desc(AIConversation.created_at)).limit(limit)
+        )
+    ).scalars().all()
+    return {
+        "historial": [
+            AIHistoryItem(
+                id=str(r.id),
+                pregunta=r.pregunta,
+                respuesta=r.respuesta,
+                sugerencia=r.sugerencia,
+                contexto=r.contexto,
+                created_at=r.created_at.isoformat(),
+            )
+            for r in rows
+        ]
+    }
 
 
 @router.get("/system-status")

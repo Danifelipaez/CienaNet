@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.environmental import (
@@ -12,6 +12,7 @@ from app.models.environmental import (
     SatelliteData,
     WeatherSnapshot,
 )
+from app.models.messaging import CatchReport
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
 from app.services.ingestion.satellite import get_satellite_data
 from app.services.ingestion.weather import get_weather_forecast
@@ -120,6 +121,16 @@ async def get_history(db: AsyncSession, days: int) -> dict:
         )
     ).scalars().all()
 
+    catch_day = func.date(CatchReport.timestamp)
+    catch_rows = (
+        await db.execute(
+            select(catch_day.label("date"), func.avg(CatchReport.cantidad_indice).label("avg"))
+            .where(CatchReport.timestamp >= cutoff, CatchReport.cantidad_indice.isnot(None))
+            .group_by(catch_day)
+            .order_by(catch_day)
+        )
+    ).all()
+
     return {
         "weather": [
             {
@@ -146,6 +157,10 @@ async def get_history(db: AsyncSession, days: int) -> dict:
                 "chlorophyll_mgm3": r.chlorophyll_mgm3,
             }
             for r in satellite_rows
+        ],
+        "captura": [
+            {"date": r.date.isoformat(), "cantidad_indice": round(r.avg, 2)}
+            for r in catch_rows
         ],
     }
 
