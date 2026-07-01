@@ -11,6 +11,7 @@ territorial (ver docs/CONTEXT.md, rol "Diego"). Ajustar libremente sin
 necesidad de nueva migración: son datos, no esquema.
 """
 
+import json
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -80,17 +81,26 @@ def upgrade() -> None:
         ["id"],
     )
 
-    fishing_points_table = sa.table(
-        "fishing_points",
-        sa.column("nombre", sa.String),
-        sa.column("lat", sa.Float),
-        sa.column("lng", sa.Float),
-        sa.column("sal_min", sa.Float),
-        sa.column("sal_max", sa.Float),
-        sa.column("especies", postgresql.JSONB),
-        sa.column("observacion", sa.Text),
+    # op.bulk_insert() con una columna JSONB no se puede renderizar como SQL
+    # literal en modo offline (`alembic upgrade head --sql`) — el literal_processor
+    # de postgresql.JSONB no soporta listas/objetos. Se inserta con CAST(...AS
+    # jsonb) sobre un parámetro string (json.dumps), que sí renderiza offline.
+    insert_stmt = sa.text(
+        "INSERT INTO fishing_points (nombre, lat, lng, sal_min, sal_max, especies, observacion) "
+        "VALUES (:nombre, :lat, :lng, :sal_min, :sal_max, CAST(:especies AS jsonb), :observacion)"
     )
-    op.bulk_insert(fishing_points_table, _POINTS)
+    for p in _POINTS:
+        op.execute(
+            insert_stmt.bindparams(
+                nombre=p["nombre"],
+                lat=p["lat"],
+                lng=p["lng"],
+                sal_min=p["sal_min"],
+                sal_max=p["sal_max"],
+                especies=json.dumps(p["especies"], ensure_ascii=False),
+                observacion=p["observacion"],
+            )
+        )
 
 
 def downgrade() -> None:

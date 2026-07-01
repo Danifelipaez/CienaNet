@@ -11,6 +11,7 @@ from app.core.database import Base
 import app.models.environmental  # noqa: F401  (registra las tablas en Base.metadata)
 import app.models.messaging  # noqa: F401
 import app.models.fishing_points  # noqa: F401
+import app.models.dashboard  # noqa: F401
 
 config = context.config
 
