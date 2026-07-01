@@ -25,6 +25,7 @@ MOCK_SNAPSHOT = {
 
 MOCK_HISTORY = {
     "weather": [{"timestamp": "2026-06-29T10:00:00+00:00", "temperature_c": 28.0, "wind_speed_kmh": 12.0, "precipitation_mm": 0.0}],
+    "captura": [{"date": "2026-06-29", "cantidad_indice": 55.0}],
     "semaphore": [{"date": "2026-06-29", "color": "green", "reason": "Condiciones favorables", "ipp_ranking": []}],
     "satellite": [{"date": "2026-06-27", "sst_celsius": 27.4, "chlorophyll_mgm3": 3.8}],
 }
@@ -43,6 +44,7 @@ def mock_db():
     mock_result.scalar_one_or_none.return_value = None
     mock_result.scalars.return_value.all.return_value = []
     mock_session.execute.return_value = mock_result
+    mock_session.add = MagicMock()  # AsyncSession.add() es síncrono, no una coroutine
 
     async def override_get_db():
         yield mock_session
@@ -106,6 +108,7 @@ def test_history_tiene_claves(client):
     assert "weather" in data
     assert "semaphore" in data
     assert "satellite" in data
+    assert "captura" in data
 
 
 def test_history_days_invalido(client):
@@ -143,3 +146,64 @@ def test_alerts_tiene_claves(client):
         data = client.get("/api/v1/data/alerts").json()
     assert "cyclones" in data
     assert "external" in data
+
+
+# ── /dashboard/sedimentation ─────────────────────────────────────────────────
+
+
+def test_sedimentation_retorna_200(client):
+    with patch(
+        "app.api.v1.routers.dashboard.get_sedimentation_zones", new_callable=AsyncMock
+    ) as mock_zones:
+        mock_zones.return_value = [
+            {"id": "z1", "nombre": "Caño X", "polygon": [[10.0, -74.0]], "nivel": "alto", "observacion": None}
+        ]
+        data = client.get("/api/v1/dashboard/sedimentation").json()
+    assert "zonas" in data
+    assert data["zonas"][0]["nivel"] == "alto"
+
+
+# ── /dashboard/ai/ask ─────────────────────────────────────────────────────────
+
+
+def test_ai_ask_requiere_admin_key(client):
+    resp = client.post("/api/v1/dashboard/ai/ask", json={"pregunta": "¿hola?"})
+    assert resp.status_code == 422  # falta header requerido X-Admin-Key
+
+
+def test_ai_ask_rechaza_admin_key_invalida(client):
+    resp = client.post(
+        "/api/v1/dashboard/ai/ask",
+        json={"pregunta": "¿hola?"},
+        headers={"X-Admin-Key": "incorrecta"},
+    )
+    assert resp.status_code == 403
+
+
+def test_ai_ask_stub_retorna_parrafos(client):
+    with patch(
+        "app.api.v1.routers.dashboard.get_latest_snapshot", new_callable=AsyncMock
+    ) as mock_snap:
+        mock_snap.return_value = MOCK_SNAPSHOT
+        data = client.post(
+            "/api/v1/dashboard/ai/ask",
+            json={"pregunta": "¿cómo está la ciénaga?"},
+            headers={"X-Admin-Key": "test-admin-key"},
+        ).json()
+    assert "parrafos" in data
+    assert data["parrafos"][0]["tipo"] == "limitaciones"  # sin proveedor de IA configurado (stub)
+
+
+# ── /dashboard/ai/history ────────────────────────────────────────────────────
+
+
+def test_ai_history_sin_datos_retorna_lista_vacia(client):
+    data = client.get(
+        "/api/v1/dashboard/ai/history", headers={"X-Admin-Key": "test-admin-key"}
+    ).json()
+    assert data == {"historial": []}
+
+
+def test_ai_history_requiere_admin_key(client):
+    resp = client.get("/api/v1/dashboard/ai/history")
+    assert resp.status_code == 422
