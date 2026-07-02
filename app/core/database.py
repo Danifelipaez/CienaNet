@@ -19,9 +19,19 @@ class Base(DeclarativeBase):
 # Runtime usa el pooler de Supabase (puerto 6543, modo transaction).
 # pgBouncer en modo transaction no soporta prepared statements de asyncpg;
 # statement_cache_size=0 es obligatorio o las queries fallan intermitentemente.
-engine = create_async_engine(
+def _asyncpg_url(raw: str) -> str:
+    """Normaliza la URL de Postgres a asyncpg. Falla claro si viene vacía/inválida."""
+    if "://" not in raw:
+        raise RuntimeError(
+            "POSTGRES_PRISMA_URL vacío o inválido. Copia la connection string de Supabase "
+            "(Settings → Database → Transaction pooler, puerto 6543) al .env."
+        )
     # ponytail: Vercel emite postgres:// con ?sslmode=require; asyncpg usa ssl= en connect_args
-    "postgresql+asyncpg://" + settings.postgres_prisma_url.split("://", 1)[1].split("?")[0],
+    return "postgresql+asyncpg://" + raw.split("://", 1)[1].split("?")[0]
+
+
+engine = create_async_engine(
+    _asyncpg_url(settings.postgres_prisma_url),
     connect_args={"statement_cache_size": 0, "ssl": "require"},
     pool_pre_ping=True,
 )

@@ -6,8 +6,8 @@ Se ejecuta al importar conftest (antes de colectar los tests), de modo que
 
 import os
 
-os.environ.setdefault("DATABASE_URL_POOLER", "postgresql://u:p@localhost:6543/db")
-os.environ.setdefault("DATABASE_URL_DIRECT", "postgresql://u:p@localhost:5432/db")
+os.environ.setdefault("POSTGRES_PRISMA_URL", "postgresql://u:p@localhost:6543/db")
+os.environ.setdefault("POSTGRES_URL_NON_POOLING", "postgresql://u:p@localhost:5432/db")
 os.environ.setdefault("SUPABASE_URL", "http://localhost")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "dummy")
 os.environ.setdefault("SENSOR_API_KEY_SECRET", "dummy-salt")

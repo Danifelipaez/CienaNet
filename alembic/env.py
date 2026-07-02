@@ -7,6 +7,7 @@ from alembic import context
 
 import os
 
+from app.core.config import settings
 from app.core.database import Base
 import app.models.environmental  # noqa: F401  (registra las tablas en Base.metadata)
 import app.models.messaging  # noqa: F401
@@ -15,8 +16,12 @@ import app.models.dashboard  # noqa: F401
 
 config = context.config
 
-# Tomar la URL de DATABASE_URL_DIRECT o POSTGRES_URL_NON_POOLING (Vercel)
-_db_url = os.environ.get("DATABASE_URL_DIRECT") or os.environ.get("POSTGRES_URL_NON_POOLING", "")
+# URL de la conexión directa (puerto 5432). settings ya carga el .env, así que
+# alembic funciona igual local (.env) que en CI/Vercel (env vars del entorno).
+_db_url = os.environ.get("DATABASE_URL_DIRECT") or settings.postgres_url_non_pooling
+# SQLAlchemy 2.0 exige postgresql://; Vercel/Supabase a veces emiten postgres://
+if _db_url.startswith("postgres://"):
+    _db_url = "postgresql://" + _db_url.split("://", 1)[1]
 config.set_main_option("sqlalchemy.url", _db_url)
 
 # Interpret the config file for Python logging.

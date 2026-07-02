@@ -67,7 +67,7 @@ async def ask_ai(
         f"mg/m³, temperatura superficial {snapshot['satellite'].get('sst_celsius')} °C. "
         "Responde en español, citando los datos disponibles."
     )
-    result = await get_ai_provider().complete(system=system, user=body.pregunta)
+    result = await get_ai_provider().answer_structured(system=system, user=body.pregunta)
 
     db.add(
         AIConversation(

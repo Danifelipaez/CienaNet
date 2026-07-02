@@ -9,9 +9,10 @@ captura. Todo lo demás cae al AIProvider (stub hasta que se conecte uno real).
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.messaging import CatchReport, Conversation, User
 from app.services import whatsapp_service
 from app.services.ai_service import get_ai_provider
@@ -61,6 +62,27 @@ async def _condicion_actual(db: AsyncSession) -> str:
     return f"{emoji} Condición actual: {sem['reason']}."
 
 
+async def _recent_history(user_id, db: AsyncSession) -> list[dict]:
+    """Últimos mensajes de la conversación como contexto para Gemini (orden cronológico).
+
+    Mapea direction 'in'→'user', 'out'→'model' (roles de la API de Gemini).
+    Excluye el mensaje actual, que el caller ya agrega aparte.
+    """
+    rows = (
+        await db.execute(
+            select(Conversation.direction, Conversation.body)
+            .where(Conversation.user_id == user_id, Conversation.body.isnot(None))
+            .order_by(desc(Conversation.created_at))
+            .limit(settings.ai_history_turns + 1)
+        )
+    ).all()
+    history = [
+        {"role": "user" if d == "in" else "model", "parts": [{"text": b}]}
+        for d, b in reversed(rows)
+    ]
+    return history[:-1]  # quita el mensaje actual (el más reciente)
+
+
 def _detect_especie(text_lower: str) -> str | None:
     for keyword, label in _ESPECIES.items():
         if keyword in text_lower:
@@ -94,12 +116,15 @@ async def handle_incoming_text(
         await db.commit()
         reply = f"Gracias por reportar tu pesca de {especie} 🎣. Esto ayuda a toda la comunidad."
     else:
-        ai_reply = await get_ai_provider().complete(
+        # ponytail: llamada a Gemini inline (Vercel serverless no tiene background
+        # tasks confiables). Mover a cola solo si la latencia molesta.
+        ai_reply = await get_ai_provider().reply_text(
             system=(
                 "Eres el asistente de CienRayas para pescadores artesanales de la "
                 "Ciénaga Grande de Santa Marta. Responde breve y claro, en español."
             ),
             user=text,
+            history=await _recent_history(user.id, db),
         )
         reply = ai_reply or _NO_ENTENDI
 

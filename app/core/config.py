@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     # IA / NLU — proveedor agnóstico; la implementación concreta vive en ai_service.py
     ai_api_key: str = ""
+    ai_model: str = "gemini-flash-lite-latest"  # ajustar al id exacto de AI Studio
+    ai_history_turns: int = 10  # mensajes previos que se mandan como contexto en WhatsApp
 
     # App
     sensor_api_key_secret: str
