@@ -8,6 +8,8 @@ import { LineChart, ScatterChart, MoonGlyph } from "@/components/ui/charts";
 import type { HistoryResponse } from "@/lib/api";
 import {
   weatherToVientoSeries,
+  weatherToVientoDiario,
+  weatherToVientoSemanal,
   satelliteToTempSeries,
   satelliteToChloroSeries,
   catchToSeries,
@@ -17,29 +19,58 @@ import {
 import { moonPhaseGlyph, moonPhaseLabel } from "@/lib/moon";
 
 const RANGOS = ["7", "30", "90"] as const;
+const VISTAS_VIENTO = ["hora", "dia", "7dias"] as const;
+const VISTA_VIENTO_LABEL: Record<(typeof VISTAS_VIENTO)[number], string> = {
+  hora: "Hora",
+  dia: "Día",
+  "7dias": "7 días",
+};
 
+/** Nodos en los puntos donde la fase realmente cambia (evita repetir la misma fase en nodos consecutivos). */
 function fasesLuna(days: number) {
   const now = new Date();
-  const offsets = [days - 1, Math.floor(days * 0.75), Math.floor(days * 0.5), Math.floor(days * 0.25), 0];
-  return offsets.map((offsetDaysAgo, idx) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - offsetDaysAgo);
+  const start = new Date(now);
+  start.setDate(start.getDate() - (days - 1));
+  const nodos: { i: number; glyph: ReturnType<typeof moonPhaseGlyph> }[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
     const glyph = moonPhaseGlyph(d);
-    return { i: days - 1 - offsetDaysAgo, glyph, label: moonPhaseLabel(glyph), activa: idx === offsets.length - 1 };
-  });
+    if (!nodos.length || nodos[nodos.length - 1].glyph !== glyph) nodos.push({ i, glyph });
+  }
+  return nodos.map((n, idx) => ({
+    i: n.i,
+    glyph: n.glyph,
+    label: moonPhaseLabel(n.glyph),
+    activa: idx === nodos.length - 1,
+  }));
 }
 
 export function GraficasView({ initialHistory }: { initialHistory: HistoryResponse }) {
   const [rango, setRango] = useState<(typeof RANGOS)[number]>("30");
   const [history, setHistory] = useState(initialHistory);
+  const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
+  const [vientoVista, setVientoVista] = useState<(typeof VISTAS_VIENTO)[number]>("hora");
 
   useEffect(() => {
     if (rango === "30" && history === initialHistory) return;
     let cancelled = false;
+    setLoading(true);
+    setFetchError(false);
     fetch(`/api/data/history?days=${rango}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
       .then((data: HistoryResponse) => {
         if (!cancelled) setHistory(data);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
@@ -47,7 +78,11 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rango]);
 
-  const vientoSerie = useMemo(() => weatherToVientoSeries(history.weather), [history]);
+  const vientoSerie = useMemo(() => {
+    if (vientoVista === "dia") return weatherToVientoDiario(history.weather);
+    if (vientoVista === "7dias") return weatherToVientoSemanal(history.weather);
+    return weatherToVientoSeries(history.weather);
+  }, [history, vientoVista]);
   const tempSerie = useMemo(() => satelliteToTempSeries(history.satellite), [history]);
   const cloroSerie = useMemo(() => satelliteToChloroSeries(history.satellite), [history]);
   const capturaSerie = useMemo(() => catchToSeries(history.captura), [history]);
@@ -77,12 +112,20 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
       <header className="cr-page-head">
         <div>
           <h1 className="serif cr-page-title">Gráficas e históricos</h1>
-          <p className="mono cr-page-sub">Registro de los últimos {rango} días</p>
+          <p className="mono cr-page-sub">
+            {loading ? "Actualizando…" : `Registro de los últimos ${rango} días`}
+          </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {fetchError && <Pill tone="rojo">No se pudo actualizar</Pill>}
           <div className="cr-segment">
             {RANGOS.map((r) => (
-              <button key={r} className={"cr-seg-btn" + (rango === r ? " active" : "")} onClick={() => setRango(r)}>
+              <button
+                key={r}
+                className={"cr-seg-btn" + (rango === r ? " active" : "")}
+                disabled={loading}
+                onClick={() => setRango(r)}
+              >
                 {r}d
               </button>
             ))}
@@ -100,13 +143,26 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
           span={12}
           motif="cana"
           actions={
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-              km/h
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="cr-segment">
+                {VISTAS_VIENTO.map((v) => (
+                  <button
+                    key={v}
+                    className={"cr-seg-btn" + (vientoVista === v ? " active" : "")}
+                    onClick={() => setVientoVista(v)}
+                  >
+                    {VISTA_VIENTO_LABEL[v]}
+                  </button>
+                ))}
+              </div>
+              <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                km/h
+              </span>
+            </div>
           }
         >
           {vientoSerie.length > 1 ? (
-            <LineChart data={vientoSerie} height={200} color="var(--verde)" area yMin={0} yMax={48} />
+            <LineChart data={vientoSerie} height={200} color="var(--verde)" area yMin={0} />
           ) : (
             <EmptySeries />
           )}
@@ -123,7 +179,7 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
             </span>
           }
         >
-          {tempSerie.length > 1 ? <LineChart data={tempSerie} height={190} color="var(--teal)" area yMin={27.5} yMax={34.5} /> : <EmptySeries />}
+          {tempSerie.length > 1 ? <LineChart data={tempSerie} height={190} color="var(--teal)" area /> : <EmptySeries />}
         </Card>
         <Card
           title="Clorofila-a"
@@ -151,12 +207,15 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
                 <svg width="26" height="26" viewBox="0 0 22 22" style={{ background: "var(--surface)", borderRadius: "50%" }}>
                   <MoonGlyph phase={f.glyph} size={22} active={f.activa} />
                 </svg>
-                <span
-                  className="mono"
-                  style={{ fontSize: 11, marginTop: 6, color: f.activa ? "var(--teal)" : "var(--ink-soft)", fontWeight: f.activa ? 700 : 400 }}
-                >
-                  {f.label}
-                </span>
+                {/* con muchos nodos (ventanas largas) los textos chocan; solo el activo se rotula siempre */}
+                {(luna.length <= 6 || f.activa) && (
+                  <span
+                    className="mono"
+                    style={{ fontSize: 11, marginTop: 6, color: f.activa ? "var(--teal)" : "var(--ink-soft)", fontWeight: f.activa ? 700 : 400 }}
+                  >
+                    {f.label}
+                  </span>
+                )}
               </div>
             ))}
           </div>

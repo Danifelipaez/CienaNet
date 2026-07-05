@@ -36,5 +36,12 @@ class Settings(BaseSettings):
     cienaga_lat: float = 10.8
     cienaga_lon: float = -74.4
 
+    # ERDDAP — dataset ids versionados en config, no en código:
+    # pueden cambiar si NOAA/Copernicus actualizan el producto satelital.
+    erddap_sst_dataset: str = "jplMURSST41"
+    # Sector "FG" (Sentinel-3 OLCI, ~278m/diario) cubre la CGSM — ver docs/RESOLUCION_FUENTES.md.
+    # Cambia si NOAA reorganiza los sectores (216 en total, uno por bloque geográfico).
+    erddap_chl_dataset: str = "noaacwS3AOLCIchlaSectorFGDaily"
+
 
 settings = Settings()

@@ -33,6 +33,7 @@ const ICON_PATHS: Record<string, string> = {
   pin: "M12 22s7-6 7-12a7 7 0 1 0-14 0c0 6 7 12 7 12Zm0-9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
   arrowRight: "M5 12h14m0 0-5-5m5 5-5 5",
   filter: "M3 5h18l-7 8v6l-4-2v-4L3 5Z",
+  trash: "M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m2 0v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7M10 11v6m4-6v6",
 };
 
 export function Icon({

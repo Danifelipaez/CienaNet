@@ -19,6 +19,23 @@ export function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
   return [ref, w];
 }
 
+function fmtAxisValue(v: number): string {
+  return Math.abs(v) >= 100 ? String(Math.round(v)) : v.toFixed(1);
+}
+
+/** Dominio con 20% de margen sobre el rango real de los datos (para que cambios pequeños se noten). */
+function paddedDomain(vals: number[], floor?: number, ceil?: number): [number, number] {
+  const dataMin = Math.min(...vals);
+  const dataMax = Math.max(...vals);
+  const span = dataMax - dataMin;
+  const pad = span > 0 ? span * 0.2 : (Math.abs(dataMax) || 1) * 0.2;
+  let lo = dataMin - pad;
+  let hi = dataMax + pad;
+  if (floor != null) lo = Math.max(lo, floor);
+  if (ceil != null) hi = Math.min(hi, ceil);
+  return [lo, hi];
+}
+
 export function LineChart({
   data,
   height = 200,
@@ -36,38 +53,56 @@ export function LineChart({
   fill?: boolean;
   unit?: string;
   annotations?: { i: number; label: string }[];
+  /** Piso/techo físico opcional (p.ej. 0 para valores que no pueden ser negativos) — no es el límite exacto del eje, el eje siempre añade el margen del 20%. */
   yMin?: number;
   yMax?: number;
   area?: boolean;
   dashGrid?: boolean;
 }) {
   const [ref, w] = useWidth();
-  const padL = 8,
+  const [hover, setHover] = useState<number | null>(null);
+  const padL = 38,
     padR = 14,
     padT = 18,
     padB = 26;
   const vals = data.map((d) => d.v);
-  const mn = yMin != null ? yMin : Math.min(...vals);
-  const mx = yMax != null ? yMax : Math.max(...vals);
+  const [mn, mx] = paddedDomain(vals, yMin, yMax);
   const range = mx - mn || 1;
   const iw = Math.max(10, w - padL - padR),
     ih = height - padT - padB;
-  const X = (i: number) => padL + (i / (data.length - 1)) * iw;
+  const X = (i: number) => padL + (i / Math.max(1, data.length - 1)) * iw;
   const Y = (v: number) => padT + ih - ((v - mn) / range) * ih;
   const pts = data.map((d, i) => [X(i), Y(d.v)]);
   const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
   const areaP = line + ` L ${X(data.length - 1).toFixed(1)} ${padT + ih} L ${padL} ${padT + ih} Z`;
-  const ticks = [
-    0,
-    Math.floor((data.length - 1) / 4),
-    Math.floor((data.length - 1) / 2),
-    Math.floor((3 * (data.length - 1)) / 4),
-    data.length - 1,
-  ];
+  const xTickCount = Math.min(5, data.length);
+  const xTicks = Array.from(
+    new Set(
+      Array.from({ length: xTickCount }, (_, k) =>
+        Math.round((k / Math.max(1, xTickCount - 1)) * (data.length - 1))
+      )
+    )
+  );
+  const yTicks = [0, 0.25, 0.5, 0.75, 1];
   const gid = "g" + Math.abs(color.length * 7 + data.length).toString(36);
+  const hoverPt = hover != null ? data[hover] : null;
+
+  function handleMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const idx = Math.round(((px - padL) / iw) * (data.length - 1));
+    setHover(Math.max(0, Math.min(data.length - 1, idx)));
+  }
+
   return (
     <div ref={ref} style={{ width: "100%" }}>
-      <svg width={w} height={height} style={{ display: "block", overflow: "visible" }}>
+      <svg
+        width={w}
+        height={height}
+        style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
+        onMouseMove={handleMove}
+        onMouseLeave={() => setHover(null)}
+      >
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity="0.16" />
@@ -75,18 +110,31 @@ export function LineChart({
           </linearGradient>
         </defs>
         {dashGrid &&
-          [0, 0.25, 0.5, 0.75, 1].map((g, i) => (
+          yTicks.map((g, i) => (
             <line
               key={i}
               x1={padL}
               x2={w - padR}
-              y1={padT + ih * g}
-              y2={padT + ih * g}
+              y1={padT + ih * (1 - g)}
+              y2={padT + ih * (1 - g)}
               stroke="var(--border)"
               strokeWidth="1"
               strokeDasharray="2 5"
             />
           ))}
+        {yTicks.map((g, i) => (
+          <text
+            key={i}
+            x={padL - 6}
+            y={padT + ih * (1 - g) + 3}
+            textAnchor="end"
+            className="mono"
+            fontSize="10"
+            fill="var(--ink-faint)"
+          >
+            {fmtAxisValue(mn + range * g)}
+          </text>
+        ))}
         {(area || fill) && <path d={areaP} fill={`url(#${gid})`} />}
         <path d={line} fill="none" stroke={color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
         {annotations.map((a, i) => {
@@ -101,12 +149,12 @@ export function LineChart({
             </g>
           );
         })}
-        {ticks.map((ti, i) => (
+        {xTicks.map((ti, i) => (
           <text
             key={i}
             x={X(ti)}
             y={height - 7}
-            textAnchor={i === 0 ? "start" : i === ticks.length - 1 ? "end" : "middle"}
+            textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"}
             className="mono"
             fontSize="10.5"
             fill="var(--ink-faint)"
@@ -114,6 +162,29 @@ export function LineChart({
             {data[ti].x}
           </text>
         ))}
+        {hoverPt && (
+          <g>
+            <line x1={X(hover!)} x2={X(hover!)} y1={padT} y2={padT + ih} stroke={color} strokeOpacity="0.35" strokeWidth="1" />
+            <circle cx={X(hover!)} cy={Y(hoverPt.v)} r="4" fill={color} stroke="var(--surface)" strokeWidth="1.5" />
+            {(() => {
+              const tw = 60,
+                th = 34;
+              const boxX = Math.min(Math.max(X(hover!) - tw / 2, padL), w - padR - tw);
+              const boxY = Math.max(Y(hoverPt.v) - th - 10, 2);
+              return (
+                <g>
+                  <rect x={boxX} y={boxY} width={tw} height={th} rx="6" fill="var(--surface)" stroke="var(--border)" />
+                  <text x={boxX + tw / 2} y={boxY + 15} textAnchor="middle" className="mono" fontSize="11" fontWeight="700" fill="var(--ink)">
+                    {fmtAxisValue(hoverPt.v)}
+                  </text>
+                  <text x={boxX + tw / 2} y={boxY + 27} textAnchor="middle" className="mono" fontSize="9" fill="var(--ink-faint)">
+                    {hoverPt.x}
+                  </text>
+                </g>
+              );
+            })()}
+          </g>
+        )}
       </svg>
     </div>
   );

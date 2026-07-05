@@ -37,6 +37,8 @@ export interface PuntoPesca {
   temp: number | null;
   clorofila: number | null;
   viento: number | null;
+  salinidad: number | null;
+  tds: number | null;
   ipp: number;
   condicion: Condicion;
 }

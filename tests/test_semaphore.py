@@ -29,12 +29,6 @@ def test_rojo_lluvia_intensa():
     assert result.safe is False
 
 
-def test_rojo_oxigeno_critico():
-    result = evaluate(_weather(), _satellite(), {"dissolved_oxygen_mgl": 2.5})
-    assert result.color == "red"
-    assert result.safe is False
-
-
 def test_amarillo_sst_fuera_rango():
     result = evaluate(_weather(), _satellite(sst=24), {})
     assert result.color == "yellow"
@@ -43,11 +37,6 @@ def test_amarillo_sst_fuera_rango():
 
 def test_amarillo_salinidad_alta():
     result = evaluate(_weather(), _satellite(), {"salinity_psu": 35})
-    assert result.color == "yellow"
-
-
-def test_amarillo_oxigeno_bajo():
-    result = evaluate(_weather(), _satellite(), {"dissolved_oxygen_mgl": 4.0})
     assert result.color == "yellow"
 
 

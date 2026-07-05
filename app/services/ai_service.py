@@ -71,8 +71,14 @@ class AIProvider(Protocol):
         """Respuesta en texto plano para WhatsApp. None si el proveedor falla."""
         ...
 
-    async def answer_structured(self, system: str, user: str) -> dict:
-        """Respuesta estructurada {parrafos, sugerencia} para el dashboard."""
+    async def answer_structured(
+        self, system: str, user: str, history: list[dict] | None = None
+    ) -> dict:
+        """Respuesta estructurada {parrafos, sugerencia} para el dashboard.
+
+        `history`: turnos previos del hilo del usuario (roles user/model de Gemini),
+        para que las preguntas de seguimiento tengan memoria de la conversación.
+        """
         ...
 
 
@@ -82,7 +88,9 @@ class _StubProvider:
     async def reply_text(self, system: str, user: str, history: list[dict] | None = None) -> str | None:
         return None
 
-    async def answer_structured(self, system: str, user: str) -> dict:
+    async def answer_structured(
+        self, system: str, user: str, history: list[dict] | None = None
+    ) -> dict:
         return _LIMITACION
 
 
@@ -92,17 +100,20 @@ class GeminiProvider:
     async def _generate(self, system: str, contents: list[dict], *, json_schema: dict | None = None) -> str | None:
         """POST a Gemini. Devuelve el texto del primer candidate, o None si algo falla."""
         url = _GENERATE_URL.format(model=settings.ai_model)
+        # thinkingBudget=0 desactiva el "thinking" de Gemini 3: sin él la latencia salta
+        # esporádicamente por encima del timeout (→ fallback) y cuesta más tokens. Este
+        # caso de uso (Q&A ambiental) no necesita razonamiento extendido.
+        generation_config: dict = {"thinkingConfig": {"thinkingBudget": 0}}
+        if json_schema is not None:
+            generation_config["responseMimeType"] = "application/json"
+            generation_config["responseSchema"] = json_schema
         payload: dict = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": contents,
+            "generationConfig": generation_config,
         }
-        if json_schema is not None:
-            payload["generationConfig"] = {
-                "responseMimeType": "application/json",
-                "responseSchema": json_schema,
-            }
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     url, params={"key": settings.ai_api_key}, json=payload
                 )
@@ -118,8 +129,11 @@ class GeminiProvider:
         contents.append({"role": "user", "parts": [{"text": user}]})
         return await self._generate(system, contents)
 
-    async def answer_structured(self, system: str, user: str) -> dict:
-        contents = [{"role": "user", "parts": [{"text": user}]}]
+    async def answer_structured(
+        self, system: str, user: str, history: list[dict] | None = None
+    ) -> dict:
+        contents = list(history or [])
+        contents.append({"role": "user", "parts": [{"text": user}]})
         raw = await self._generate(system, contents, json_schema=_STRUCTURED_SCHEMA)
         if not raw:
             return _LIMITACION

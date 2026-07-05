@@ -11,6 +11,37 @@ export function weatherToVientoSeries(rows: WeatherHistoryPoint[]): SeriesPoint[
   return rows.filter((r) => r.wind_speed_kmh != null).map((r) => ({ x: shortDate(r.timestamp), v: r.wind_speed_kmh! }));
 }
 
+function avg(vals: number[]): number {
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function vientoPorDia(rows: WeatherHistoryPoint[]): { dia: string; promedio: number }[] {
+  const porDia = new Map<string, number[]>();
+  for (const r of rows) {
+    if (r.wind_speed_kmh == null) continue;
+    const dia = r.timestamp.slice(0, 10);
+    if (!porDia.has(dia)) porDia.set(dia, []);
+    porDia.get(dia)!.push(r.wind_speed_kmh);
+  }
+  return [...porDia.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([dia, vals]) => ({ dia, promedio: avg(vals) }));
+}
+
+/** Un punto por día (promedio del día) — pensado para cubrir ~1 semana. */
+export function weatherToVientoDiario(rows: WeatherHistoryPoint[]): SeriesPoint[] {
+  return vientoPorDia(rows).map(({ dia, promedio }) => ({ x: shortDate(dia), v: promedio }));
+}
+
+/** Un punto por semana (promedio de los promedios diarios) — pensado para cubrir ~2 meses. */
+export function weatherToVientoSemanal(rows: WeatherHistoryPoint[]): SeriesPoint[] {
+  const dias = vientoPorDia(rows);
+  const semanas: SeriesPoint[] = [];
+  for (let i = 0; i < dias.length; i += 7) {
+    const semana = dias.slice(i, i + 7);
+    semanas.push({ x: shortDate(semana[0].dia), v: avg(semana.map((d) => d.promedio)) });
+  }
+  return semanas;
+}
+
 export function satelliteToTempSeries(rows: SatelliteHistoryPoint[]): SeriesPoint[] {
   return rows.filter((r) => r.sst_celsius != null).map((r) => ({ x: shortDate(r.date), v: r.sst_celsius! }));
 }

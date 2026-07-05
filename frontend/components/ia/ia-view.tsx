@@ -3,10 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/icon";
 import { SectionLabel, StatusDot } from "@/components/ui/primitives";
+import { getUserId } from "@/lib/user-id";
 import type { AIHistoryItem, AskResponse } from "@/lib/api";
-
-const EXAMPLE_QUESTION =
-  "¿Qué relación hay entre la concentración de clorofila-a y la presencia de camarón en los meses de octubre–noviembre en la Ciénaga Grande?";
 
 // Decorativo — fuentes que alimentan el análisis, no proviene de un endpoint (ver plan de puerto Next.js).
 const IA_CONTEXTO = [
@@ -112,13 +110,14 @@ function relativeTime(iso: string): string {
   return d === 1 ? "ayer" : `hace ${d} días`;
 }
 
-export function IAView({ initialHistory }: { initialHistory: AIHistoryItem[] }) {
-  const [question, setQuestion] = useState(EXAMPLE_QUESTION);
+export function IAView() {
+  const [question, setQuestion] = useState("");
   const [response, setResponse] = useState<AskResponse | null>(null);
   const [input, setInput] = useState("");
   const [stage, setStage] = useState(-1); // -1 idle, 0 typing, 1..N revealing blocks, 99 done
-  const [historial, setHistorial] = useState(initialHistory);
+  const [historial, setHistorial] = useState<AIHistoryItem[]>([]);
   const [histOpen, setHistOpen] = useState(true);
+  const [histError, setHistError] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -127,18 +126,71 @@ export function IAView({ initialHistory }: { initialHistory: AIHistoryItem[] }) 
     timers.current = [];
   }
 
+  function refreshHistory(uid: string) {
+    fetch("/api/admin/ai/history", { headers: { "X-User-Id": uid } })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((d: { historial: AIHistoryItem[] }) => {
+        setHistorial(d.historial ?? []);
+        setHistError(false);
+      })
+      .catch(() => setHistError(true));
+  }
+
+  function newChat() {
+    clearTimers();
+    setQuestion("");
+    setResponse(null);
+    setInput("");
+    setStage(-1);
+  }
+
+  // Ver una conversación pasada: la respuesta ya viene en el historial, así que se
+  // pinta directo sin volver a llamar a la IA (stage 99 = turno cerrado, sin animación).
+  function loadFromHistory(h: AIHistoryItem) {
+    clearTimers();
+    setQuestion(h.pregunta);
+    setResponse({ parrafos: h.respuesta, sugerencia: h.sugerencia });
+    setStage(99);
+  }
+
+  function deleteHistoryItem(id: string, pregunta: string) {
+    const uid = getUserId();
+    setHistorial((hs) => hs.filter((h) => h.id !== id)); // optimista
+    if (pregunta === question) newChat(); // no dejar visible lo que se borró
+    fetch(`/api/admin/ai/history?id=${id}`, { method: "DELETE", headers: { "X-User-Id": uid } })
+      .then(() => refreshHistory(uid))
+      .catch(() => refreshHistory(uid));
+  }
+
   async function ask(q: string) {
     clearTimers();
     setQuestion(q);
     setStage(0);
     setResponse(null);
 
-    const res = await fetch("/api/admin/ai/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pregunta: q }),
-    });
-    const data: AskResponse = await res.json();
+    const uid = getUserId();
+    let data: AskResponse;
+    try {
+      const res = await fetch("/api/admin/ai/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": uid },
+        body: JSON.stringify({ pregunta: q }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch {
+      // El botón nunca debe quedarse colgado en "Analizando…": ante un fallo del
+      // backend (p. ej. 403 por admin key), mostrar una limitación y cerrar el turno.
+      setResponse({
+        parrafos: [{ tipo: "limitaciones", titulo: "No disponible", html: "No se pudo obtener la respuesta del sistema. Intenta de nuevo en un momento.", items: null }],
+        sugerencia: null,
+      });
+      setStage(99);
+      return;
+    }
     setResponse(data);
 
     const blocks = data.parrafos.length + (data.sugerencia ? 1 : 0);
@@ -154,13 +206,13 @@ export function IAView({ initialHistory }: { initialHistory: AIHistoryItem[] }) 
     };
     timers.current.push(setTimeout(step, 400));
 
-    fetch("/api/admin/ai/history")
-      .then((r) => r.json())
-      .then((d: { historial: AIHistoryItem[] }) => setHistorial(d.historial));
+    refreshHistory(uid);
   }
 
+  // Historial por usuario: la identidad vive en localStorage (solo cliente), así que
+  // se carga aquí en el navegador, no en el Server Component. Sin pregunta automática.
   useEffect(() => {
-    ask(EXAMPLE_QUESTION);
+    refreshHistory(getUserId());
     return clearTimers;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -191,9 +243,10 @@ export function IAView({ initialHistory }: { initialHistory: AIHistoryItem[] }) 
             Análisis técnico-científico · Ciénaga Grande
           </p>
         </div>
-        <span style={{ color: "var(--verde-sem)", opacity: 0.7 }}>
-          <Icon name="sprout" size={26} />
-        </span>
+        <button type="button" className="cr-ia-new" onClick={newChat} disabled={question === "" && !response}>
+          <Icon name="plus" size={15} />
+          <span>Nueva conversación</span>
+        </button>
       </div>
 
       <div className="cr-badge-aviso">
@@ -217,7 +270,24 @@ export function IAView({ initialHistory }: { initialHistory: AIHistoryItem[] }) 
       </div>
 
       <div className="cr-ia-thread" ref={scrollRef}>
-        <IAMessageUser text={question} />
+        {stage === -1 && !response && (
+          <div
+            style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "48px 20px", textAlign: "center", color: "var(--ink-soft)", animation: "cr-fade-up .4s ease" }}
+          >
+            <span style={{ color: "var(--verde-sem)", opacity: 0.6 }}>
+              <Icon name="sprout" size={38} />
+            </span>
+            <p className="serif" style={{ margin: 0, fontSize: 18, color: "var(--verde)" }}>
+              Haz una pregunta técnica sobre la Ciénaga
+            </p>
+            <p style={{ margin: 0, fontSize: 13, maxWidth: 420, lineHeight: 1.5 }}>
+              La IA responde con los datos ambientales disponibles y recuerda el hilo de tu
+              conversación.
+            </p>
+          </div>
+        )}
+
+        {question && <IAMessageUser text={question} />}
 
         {stage === 0 && (
           <AIBlock label="Analizando contexto…">
@@ -293,15 +363,25 @@ export function IAView({ initialHistory }: { initialHistory: AIHistoryItem[] }) 
       </button>
       {histOpen && (
         <div className="cr-hist-list">
+          {histError && historial.length === 0 && (
+            <p style={{ fontSize: 12, color: "var(--ink-faint)", padding: "8px 4px" }}>
+              No se pudo cargar el historial.
+            </p>
+          )}
           {historial.map((h) => (
-            <button key={h.id} className={"cr-hist-item" + (h.pregunta === question ? " active" : "")} onClick={() => ask(h.pregunta)}>
-              <span style={{ fontSize: 12.5, lineHeight: 1.4, color: h.pregunta === question ? "var(--verde)" : "var(--ink-soft)", fontWeight: h.pregunta === question ? 600 : 400 }}>
-                {h.pregunta}
-              </span>
-              <span className="mono" style={{ fontSize: 10, color: "var(--ink-faint)", marginTop: 4, display: "block" }}>
-                {relativeTime(h.created_at)}
-              </span>
-            </button>
+            <div key={h.id} className={"cr-hist-item" + (h.pregunta === question ? " active" : "")}>
+              <button className="cr-hist-open" onClick={() => loadFromHistory(h)}>
+                <span style={{ fontSize: 12.5, lineHeight: 1.4, color: h.pregunta === question ? "var(--verde)" : "var(--ink-soft)", fontWeight: h.pregunta === question ? 600 : 400 }}>
+                  {h.pregunta}
+                </span>
+                <span className="mono" style={{ fontSize: 10, color: "var(--ink-faint)", marginTop: 4, display: "block" }}>
+                  {relativeTime(h.created_at)}
+                </span>
+              </button>
+              <button className="cr-hist-del" aria-label="Borrar conversación" title="Borrar" onClick={() => deleteHistoryItem(h.id, h.pregunta)}>
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
           ))}
         </div>
       )}

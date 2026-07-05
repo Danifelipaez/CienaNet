@@ -1,12 +1,17 @@
 """Índice de Potencial Pesquero por zona (KNOWLEDGE_BASE §6)."""
 
+from app.models.fishing_points import FishingPoint
+
+# ponytail: oxígeno disuelto y turbidez no tienen sensor real (no hay columnas en
+# SensorReading) — antes entraban con un default fijo (constante para las 6 zonas,
+# sin aportar señal) y con peso 0.35 entre los dos. Se quitan hasta que exista un
+# sensor real; el peso restante se redistribuye proporcionalmente entre las 4 señales
+# que sí varían con el dato observado.
 WEIGHTS = {
-    "oxygen": 0.25,
-    "sst": 0.20,
-    "salinity": 0.20,
-    "chlorophyll": 0.15,
-    "turbidity": 0.10,
-    "ph": 0.10,
+    "sst": 0.31,
+    "salinity": 0.31,
+    "chlorophyll": 0.23,
+    "ph": 0.15,
 }
 
 ZONES = [
@@ -17,13 +22,6 @@ ZONES = [
     {"name": "Tasajera/Puebloviejo", "sal_min":  3, "sal_max": 15},
     {"name": "Suroccidente",         "sal_min":  0, "sal_max":  8},
 ]
-
-
-def _score_oxygen(v: float) -> float:
-    if v >= 8: return 100
-    if v >= 4.5: return 60
-    if v >= 3: return 20
-    return 0
 
 
 def _score_sst(v: float) -> float:
@@ -38,21 +36,15 @@ def _score_chlorophyll(v: float) -> float:
     return min(100, v * 10)  # >10 mg/m³ = saturación
 
 
-def _score_turbidity(v: float) -> float:
-    return 100 if v < 30 else (60 if v < 80 else 20)
-
-
 def _score_ph(v: float) -> float:
     return 100 if 7.0 <= v <= 8.5 else 30
 
 
 def calculate_ipp(water: dict, satellite: dict, zone: dict) -> float:
     scores = {
-        "oxygen":      _score_oxygen(water.get("dissolved_oxygen_mgl", 6)),
         "sst":         _score_sst(satellite.get("sst_celsius", 28)),
         "salinity":    _score_salinity(water.get("salinity_psu", 15), zone["sal_min"], zone["sal_max"]),
         "chlorophyll": _score_chlorophyll(satellite.get("chlorophyll_mgm3", 4.5)),
-        "turbidity":   _score_turbidity(water.get("turbidity_ntu", 50)),
         "ph":          _score_ph(water.get("ph", 7.5)),
     }
     return round(sum(scores[k] * WEIGHTS[k] for k in WEIGHTS), 1)
@@ -70,8 +62,8 @@ def point_condition(ipp: float, semaphore_color: str) -> str:
     """Condición semáforo de un punto de pesca puntual (vista Mapa).
 
     No hay red de sensores por punto — solo varía la salinidad esperada
-    (calculate_ipp). Si el semáforo general ya es rojo (viento/lluvia/oxígeno
-    crítico), aplica a toda la ciénaga por igual; si no, cada punto se
+    (calculate_ipp). Si el semáforo general ya es rojo (viento/lluvia
+    peligrosa), aplica a toda la ciénaga por igual; si no, cada punto se
     colorea según qué tan bien encaja su rango de salinidad con las
     condiciones actuales.
     """
@@ -85,7 +77,7 @@ def point_condition(ipp: float, semaphore_color: str) -> str:
 
 
 def rank_points(
-    water: dict, satellite: dict, weather: dict, semaphore_color: str, points: list
+    water: dict, satellite: dict, weather: dict, semaphore_color: str, points: list[FishingPoint]
 ) -> list[dict]:
     """Igual que rank_zones pero sobre fishing_points reales (FishingPoint ORM)."""
     results = [
@@ -99,6 +91,8 @@ def rank_points(
             "temp": satellite.get("sst_celsius"),
             "clorofila": satellite.get("chlorophyll_mgm3"),
             "viento": weather.get("wind_speed_kmh"),
+            "salinidad": water.get("salinity_psu"),
+            "tds": water.get("tds_mgl"),
             "ipp": (ipp := calculate_ipp(water, satellite, {"sal_min": p.sal_min, "sal_max": p.sal_max})),
             "condicion": point_condition(ipp, semaphore_color),
         }

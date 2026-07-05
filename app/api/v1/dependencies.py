@@ -24,3 +24,16 @@ def require_admin(x_admin_key: str = Header(...)) -> None:
     """Autentica endpoints internos (admin + dashboard) por X-Admin-Key."""
     if x_admin_key != settings.admin_api_key:
         raise HTTPException(status_code=403, detail="Admin key inválida")
+
+
+def get_dashboard_user(x_user_id: str = Header(...)) -> str:
+    """Identidad blanda del usuario del dashboard (UUID de localStorage del cliente).
+
+    Sirve para aislar hilo e historial de IA por usuario, no para autorizar — el
+    control de acceso es require_admin. Si más adelante se agrega login real, este
+    valor se deriva del subject del token sin tocar los endpoints.
+    """
+    uid = x_user_id.strip()
+    if not uid:
+        raise HTTPException(status_code=422, detail="X-User-Id requerido")
+    return uid

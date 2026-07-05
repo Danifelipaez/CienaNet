@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Text, func, text
+from sqlalchemy import DateTime, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +21,9 @@ class AIConversation(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
+    # Identidad blanda del cliente (UUID de localStorage, enviado como X-User-Id).
+    # Aísla hilo e historial por usuario. Índice compuesto (user_id, created_at) en la migración 007.
+    user_id: Mapped[str] = mapped_column(String(64), server_default=text("'legacy'"))
     pregunta: Mapped[str] = mapped_column(Text)
     respuesta: Mapped[list] = mapped_column(JSONB)
     sugerencia: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -33,6 +33,10 @@ function markerIcon(L: typeof import("leaflet"), cond: string, selected: boolean
   });
 }
 
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function popupHTML(p: PuntoPesca) {
   return `<div style="padding:14px 16px;font-family:var(--font-body)">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
@@ -42,10 +46,11 @@ function popupHTML(p: PuntoPesca) {
     <div style="display:flex;gap:14px;margin-bottom:10px">
       <div><div class="mono" style="font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em">Temp. sup.</div><div class="serif" style="font-size:17px;color:var(--ink)">${(p.temp ?? 0).toFixed(1)}<span class="mono" style="font-size:11px;color:var(--ink-soft)"> °C</span></div></div>
       <div><div class="mono" style="font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em">Clorofila-a</div><div class="serif" style="font-size:17px;color:var(--ink)">${(p.clorofila ?? 0).toFixed(1)}<span class="mono" style="font-size:11px;color:var(--ink-soft)"> mg/m³</span></div></div>
+      <div><div class="mono" style="font-size:10px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em">Salinidad</div><div class="serif" style="font-size:17px;color:var(--ink)">${p.salinidad != null ? p.salinidad.toFixed(1) : "—"}<span class="mono" style="font-size:11px;color:var(--ink-soft)"> PSU</span></div></div>
     </div>
     <div style="font-size:12.5px;line-height:1.45;color:var(--ink-soft);border-top:1px solid var(--border);padding-top:9px">
       <div class="mono" style="font-size:9.5px;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px">Observación comunitaria</div>
-      ${p.observacion ?? ""}
+      ${p.observacion ? escapeHtml(p.observacion) : ""}
     </div>
   </div>`;
 }

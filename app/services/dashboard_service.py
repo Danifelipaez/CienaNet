@@ -77,6 +77,7 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         },
         "weather": weather_data,
         "satellite": satellite_data,
+        "water": water,
         "sensors": [
             {
                 "zone": r.sensor.location if r.sensor else None,

@@ -4,7 +4,7 @@ from app.services.ipp import ZONES, calculate_ipp, rank_zones
 
 
 def _water_opt():
-    return {"dissolved_oxygen_mgl": 9, "salinity_psu": 15, "turbidity_ntu": 20, "ph": 7.8}
+    return {"salinity_psu": 15, "ph": 7.8}
 
 
 def _satellite_opt():
@@ -36,9 +36,9 @@ def test_ipp_optimo_alto():
 
 def test_ipp_salinidad_fuera_rango_baja_score():
     zone = ZONES[0]  # Boca de la Barra: sal_min=20, sal_max=36
-    water_low_sal = {"dissolved_oxygen_mgl": 9, "salinity_psu": 5}  # salinity=5, fuera de 20-36
+    water_low_sal = {"salinity_psu": 5}  # salinity=5, fuera de 20-36
     score = calculate_ipp(water_low_sal, _satellite_opt(), zone)
-    # salinity 0 puntos (0.20 peso) baja el score
+    # salinity 0 puntos (0.31 peso) baja el score
     assert score < 80
 
 

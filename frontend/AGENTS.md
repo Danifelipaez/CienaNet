@@ -1,5 +1,3 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Frontend
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+Standard Next.js App Router project. No non-standard conventions to call out here — see `frontend/CLAUDE.md` and the root `CLAUDE.md`/`docs/` for actual project context.

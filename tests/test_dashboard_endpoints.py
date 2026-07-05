@@ -17,6 +17,7 @@ MOCK_SNAPSHOT = {
     "semaphore": {"color": "green", "reason": "Condiciones favorables", "safe": True},
     "weather": {"temperature_c": 28.0, "wind_speed_kmh": 12.0, "wind_direction_deg": 90.0, "precipitation_mm": 0.0},
     "satellite": {"sst_celsius": 27.4, "chlorophyll_mgm3": 3.8, "date": "2026-06-27"},
+    "water": {"ph": 7.8, "temperature_c": 28.0, "conductivity_mscm": 5.2, "water_level_cm": 45.0, "salinity_psu": 12.3, "tds_mgl": 3100.0},
     "sensors": [],
     "ipp_ranking": [{"zone": "Caño Clarín", "ipp": 82.5}],
     "cyclone_alerts": [],
@@ -43,6 +44,7 @@ def mock_db():
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
     mock_result.scalars.return_value.all.return_value = []
+    mock_result.all.return_value = []  # _load_thread usa execute(...).all() directo
     mock_session.execute.return_value = mock_result
     mock_session.add = MagicMock()  # AsyncSession.add() es síncrono, no una coroutine
 
@@ -168,30 +170,47 @@ def test_sedimentation_retorna_200(client):
 
 def test_ai_ask_requiere_admin_key(client):
     resp = client.post("/api/v1/dashboard/ai/ask", json={"pregunta": "¿hola?"})
-    assert resp.status_code == 422  # falta header requerido X-Admin-Key
+    assert resp.status_code == 422  # faltan headers requeridos (X-Admin-Key / X-User-Id)
+
+
+def test_ai_ask_requiere_user_id(client):
+    """Con admin key válida pero sin X-User-Id → 422 (identidad de usuario obligatoria)."""
+    resp = client.post(
+        "/api/v1/dashboard/ai/ask",
+        json={"pregunta": "¿hola?"},
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert resp.status_code == 422
 
 
 def test_ai_ask_rechaza_admin_key_invalida(client):
     resp = client.post(
         "/api/v1/dashboard/ai/ask",
         json={"pregunta": "¿hola?"},
-        headers={"X-Admin-Key": "incorrecta"},
+        headers={"X-Admin-Key": "incorrecta", "X-User-Id": "u1"},
     )
     assert resp.status_code == 403
 
 
 def test_ai_ask_stub_retorna_parrafos(client):
+    # Fuerza el stub explícitamente: el .env real puede traer AI_API_KEY, y no
+    # queremos que el test golpee la API de Gemini de verdad ni dependa del
+    # _provider global (que otros tests resetean).
+    from app.services.ai_service import _StubProvider
+
     with patch(
         "app.api.v1.routers.dashboard.get_latest_snapshot", new_callable=AsyncMock
-    ) as mock_snap:
+    ) as mock_snap, patch(
+        "app.api.v1.routers.dashboard.get_ai_provider", return_value=_StubProvider()
+    ):
         mock_snap.return_value = MOCK_SNAPSHOT
         data = client.post(
             "/api/v1/dashboard/ai/ask",
             json={"pregunta": "¿cómo está la ciénaga?"},
-            headers={"X-Admin-Key": "test-admin-key"},
+            headers={"X-Admin-Key": "test-admin-key", "X-User-Id": "u1"},
         ).json()
     assert "parrafos" in data
-    assert data["parrafos"][0]["tipo"] == "limitaciones"  # sin proveedor de IA configurado (stub)
+    assert data["parrafos"][0]["tipo"] == "limitaciones"  # stub → limitación
 
 
 # ── /dashboard/ai/history ────────────────────────────────────────────────────
@@ -199,7 +218,8 @@ def test_ai_ask_stub_retorna_parrafos(client):
 
 def test_ai_history_sin_datos_retorna_lista_vacia(client):
     data = client.get(
-        "/api/v1/dashboard/ai/history", headers={"X-Admin-Key": "test-admin-key"}
+        "/api/v1/dashboard/ai/history",
+        headers={"X-Admin-Key": "test-admin-key", "X-User-Id": "u1"},
     ).json()
     assert data == {"historial": []}
 
@@ -207,3 +227,68 @@ def test_ai_history_sin_datos_retorna_lista_vacia(client):
 def test_ai_history_requiere_admin_key(client):
     resp = client.get("/api/v1/dashboard/ai/history")
     assert resp.status_code == 422
+
+
+# ── DELETE /dashboard/ai/history/{id} ────────────────────────────────────────
+
+
+def test_ai_history_delete_ok(client):
+    resp = client.delete(
+        "/api/v1/dashboard/ai/history/11111111-1111-1111-1111-111111111111",
+        headers={"X-Admin-Key": "test-admin-key", "X-User-Id": "u1"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+def test_ai_history_delete_id_invalido(client):
+    resp = client.delete(
+        "/api/v1/dashboard/ai/history/no-es-uuid",
+        headers={"X-Admin-Key": "test-admin-key", "X-User-Id": "u1"},
+    )
+    assert resp.status_code == 422  # el path param uuid.UUID no valida
+
+
+def test_ai_history_delete_requiere_admin_key(client):
+    resp = client.delete(
+        "/api/v1/dashboard/ai/history/11111111-1111-1111-1111-111111111111",
+        headers={"X-User-Id": "u1"},
+    )
+    assert resp.status_code == 422
+
+
+# ── memoria de hilo por usuario (helpers) ─────────────────────────────────────
+
+
+def test_parrafos_to_text_aplana():
+    from app.api.v1.routers.dashboard import _parrafos_to_text
+
+    parrafos = [
+        {"tipo": "texto", "html": "hola mundo"},
+        {"tipo": "datos", "titulo": "Datos", "items": [{"v": "27°C", "d": "SST", "fuente": "MODIS"}]},
+    ]
+    out = _parrafos_to_text(parrafos, "¿siguiente?")
+    assert "hola mundo" in out
+    assert "27°C" in out and "MODIS" in out
+    assert "Sugerencia: ¿siguiente?" in out
+
+
+def test_load_thread_alterna_roles_en_orden_cronologico():
+    """El hilo reenviado a Gemini alterna user/model y va de más antiguo a más nuevo."""
+    from app.api.v1.routers import dashboard
+
+    result = MagicMock()
+    # execute(...).all() devuelve filas en orden desc (más reciente primero)
+    result.all.return_value = [
+        ("q2", [{"tipo": "texto", "html": "a2"}], None),
+        ("q1", [{"tipo": "texto", "html": "a1"}], None),
+    ]
+    db = AsyncMock()
+    db.execute.return_value = result
+
+    import asyncio
+
+    hist = asyncio.run(dashboard._load_thread("user-x", db))
+    assert [h["role"] for h in hist] == ["user", "model", "user", "model"]
+    assert hist[0]["parts"][0]["text"] == "q1"  # cronológico: q1 primero
+    assert hist[-1]["parts"][0]["text"] == "a2"  # a2 al final
