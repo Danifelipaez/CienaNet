@@ -9,11 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.environmental import (
     DailySemaphore,
+    IdeamHidroReading,
     SatelliteData,
     WeatherSnapshot,
 )
 from app.models.messaging import CatchReport
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
+from app.services.ingestion.ideam_hidro import get_nivel_historia, get_precipitacion_historia
 from app.services.ingestion.satellite import get_satellite_data
 from app.services.ingestion.weather import get_weather_forecast
 from app.services.ipp import rank_zones
@@ -22,6 +24,10 @@ from app.services.sensor_service import aggregate_sensor_readings, get_latest_re
 
 logger = logging.getLogger(__name__)
 
+# Ventana de respaldo IDEAM: el cron corre 1 vez/día (Vercel) — unos días de
+# solape cubren el rezago propio de la fuente (~2 días) sin recorrer meses.
+_IDEAM_BACKFILL_DAYS = 7
+
 
 async def get_latest_snapshot(db: AsyncSession) -> dict:
     """Obtiene datos de todas las fuentes y retorna el snapshot actual.
@@ -29,6 +35,13 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     Estrategia DB-first para satélite: evita llamadas lentas a NASA ERDDAP
     en cada cold-start de Vercel cuando ya hay datos del día en la DB.
     """
+    # Se lanza ya para que corra en paralelo con el resto (I/O de red
+    # independiente, no comparte la sesión async de SQLAlchemy).
+    ideam_task = asyncio.gather(
+        get_precipitacion_historia(_IDEAM_BACKFILL_DAYS),
+        get_nivel_historia(_IDEAM_BACKFILL_DAYS),
+    )
+
     sat_date = date.today() - timedelta(days=2)
     db_satellite = (
         await db.execute(
@@ -64,10 +77,13 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     ipp = rank_zones(water, satellite_data)
     today = date.today()
 
+    ideam_precipitacion, ideam_nivel_rio = await ideam_task
+
     # Persistencia secuencial (una sola sesión async, no concurrent)
     await _save_weather(db, weather_data)
     await _save_satellite(db, satellite_data, today)
     await _upsert_semaphore(db, today, semaphore, ipp)
+    await _save_ideam_hidro(db, ideam_precipitacion, ideam_nivel_rio)
 
     return {
         "semaphore": {
@@ -95,6 +111,10 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
 
 async def get_history(db: AsyncSession, days: int) -> dict:
     """Retorna series de tiempo de los últimos N días desde la DB."""
+    # Se lanza ya para que corra en paralelo con las queries de DB de abajo (I/O
+    # de red independiente, no comparte la sesión async de SQLAlchemy).
+    ideam_task = asyncio.gather(get_precipitacion_historia(days), get_nivel_historia(days))
+
     cutoff = datetime.now(UTC) - timedelta(days=days)
     cutoff_date = cutoff.date()
 
@@ -132,7 +152,11 @@ async def get_history(db: AsyncSession, days: int) -> dict:
         )
     ).all()
 
+    ideam_precipitacion, ideam_nivel_rio = await ideam_task
+
     return {
+        "ideam_precipitacion": ideam_precipitacion,
+        "ideam_nivel_rio": ideam_nivel_rio,
         "weather": [
             {
                 "timestamp": r.timestamp.isoformat(),
@@ -217,6 +241,34 @@ async def _save_satellite(db: AsyncSession, data: dict, today: date) -> None:
             chlorophyll_mgm3=data.get("chlorophyll_mgm3"),
         )
     )
+    await db.commit()
+
+
+async def _save_ideam_hidro(db: AsyncSession, precipitacion: list[dict], nivel: list[dict]) -> None:
+    """Guarda lecturas diarias IDEAM nuevas. Dedup por (variable, estacion, date):
+    si ya existe la fila se salta — no se sobreescribe (mismo criterio que
+    `_save_satellite`), así que un día ya guardado con dato parcial no se corrige
+    después; el rezago propio de la fuente (~2 días) hace que esto sea poco común.
+    """
+    rows = [("precipitacion_mm", r["estacion"], r["date"], r["precipitacion_mm"]) for r in precipitacion]
+    rows += [("nivel_m", r["estacion"], r["date"], r["nivel_m"]) for r in nivel]
+
+    for variable, estacion, date_str, valor in rows:
+        row_date = date.fromisoformat(date_str)
+        existing = (
+            await db.execute(
+                select(IdeamHidroReading).where(
+                    IdeamHidroReading.variable == variable,
+                    IdeamHidroReading.estacion == estacion,
+                    IdeamHidroReading.date == row_date,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing:
+            continue
+        db.add(
+            IdeamHidroReading(variable=variable, estacion=estacion, date=row_date, valor=valor)
+        )
     await db.commit()
 
 

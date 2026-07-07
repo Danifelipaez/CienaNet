@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, String, Text, func, text
+from sqlalchemy import Date, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -122,6 +122,29 @@ class SedimentationZone(Base):
     polygon: Mapped[list] = mapped_column(JSONB)
     nivel: Mapped[str] = mapped_column(String(10))  # "bajo" | "medio" | "alto"
     observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class IdeamHidroReading(Base):
+    """Lectura diaria agregada de una estación IDEAM en vivo (precipitación o nivel
+    de río, ver `app/services/ingestion/ideam_hidro.py`). Persistida por el cron
+    diario (`GET /data/latest`) como respaldo propio ante la API pública de IDEAM.
+    """
+
+    __tablename__ = "ideam_hidro_readings"
+    __table_args__ = (
+        UniqueConstraint("variable", "estacion", "date", name="uq_ideam_hidro_variable_estacion_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    variable: Mapped[str] = mapped_column(String(30))  # "precipitacion_mm" | "nivel_m"
+    estacion: Mapped[str] = mapped_column(String(100))
+    date: Mapped[date] = mapped_column(Date)
+    valor: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
