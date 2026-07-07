@@ -46,7 +46,7 @@
    httpx>=0.27            # tests + futuros servicios
    ```
 3. `runtime.txt` → `python-3.11`
-4. `.env.example` con las variables de [KNOWLEDGE_BASE.md §9](./KNOWLEDGE_BASE.md) + `DATABASE_URL_POOLER` y `DATABASE_URL_DIRECT`
+4. `.env.example` con las variables de [KNOWLEDGE_BASE.md §9](./KNOWLEDGE_BASE.md) + `POSTGRES_PRISMA_URL` y `POSTGRES_URL_NON_POOLING`
 5. `.gitignore` → `.env`, `__pycache__/`, `.pytest_cache/`, `*.pyc`
 6. `vercel.json`:
    ```json
@@ -75,13 +75,13 @@ database_url_direct: str   # migraciones Alembic (puerto 5432)
 **Check (self-test, dejar en `tests/test_config.py`):**
 ```python
 def test_settings_loads(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL_POOLER", "postgresql://x")
-    monkeypatch.setenv("DATABASE_URL_DIRECT", "postgresql://x")
+    monkeypatch.setenv("POSTGRES_PRISMA_URL", "postgresql://x")
+    monkeypatch.setenv("POSTGRES_URL_NON_POOLING", "postgresql://x")
     monkeypatch.setenv("SUPABASE_URL", "x")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "x")
     monkeypatch.setenv("SENSOR_API_KEY_SECRET", "x")
     from app.core.config import Settings
-    assert Settings().cienaga_lat == 10.8
+    assert Settings().cienaga_lat == 10.859056
 ```
 
 ---

@@ -13,33 +13,61 @@
 │                        FASTAPI BACKEND                               │
 │                   (Vercel — Python Serverless)                       │
 │                                                                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
-│  │  /webhook    │  │  /sensors    │  │  /admin                  │  │
-│  │  (Meta WA)   │  │  (IoT Data)  │  │  (Dashboard interno)     │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────────────────┘  │
-│         │                 │                                          │
-│  ┌──────▼─────────────────▼────────────────────────────────────┐   │
-│  │                    Capa de Servicios                         │   │
-│  │  MessageService │ SensorService │ AlertService │ AIService   │   │
-│  └──────────────────────────┬────────────────────────────────--┘   │
+│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────────────────┐  │
+│  │ /webhook  │ │ /sensors  │ │ /admin    │ │ /dashboard, /data  │  │
+│  │ (Meta WA) │ │ (IoT)     │ │ (interno) │ │ (API del frontend) │  │
+│  └─────┬─────┘ └─────┬─────┘ └─────┬─────┘ └─────────┬──────────┘  │
+│        │             │             │                 │              │
+│  ┌─────▼─────────────▼─────────────▼─────────────────▼───────────┐ │
+│  │                       Capa de Servicios                        │ │
+│  │  message_router · whatsapp_service · sensor_service ·          │ │
+│  │  alert_service · ai_service · dashboard_service ·               │ │
+│  │  points_service · sedimentation_service · system_status_service │ │
+│  │  · semaphore · ipp · derived · ingestion/{weather,satellite,    │ │
+│  │  alerts_ext}                                                    │ │
+│  └──────────────────────────┬───────────────────────────────────--┘ │
 └─────────────────────────────┼────────────────────────────────------┘
                               │
                     ┌─────────▼─────────┐
                     │    Supabase       │
                     │   (PostgreSQL)    │
-                    │  - conversations  │
-                    │  - sensor_readings│
                     │  - users          │
-                    │  - alerts         │
+                    │  - conversations  │
+                    │  - catch_reports  │
+                    │  - alert_log      │
+                    │  - sensors /      │
+                    │    sensor_readings│
+                    │  - weather_snap.  │
+                    │  - satellite_data │
+                    │  - external_alerts│
+                    │  - sedimentation_ │
+                    │    zones          │
+                    │  - daily_semaphore│
+                    │  - fishing_points │
+                    │  - ai_conversation│
                     └───────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                       RED DE SENSORES IoT                            │
 │                                                                      │
-│  [Sensor ESP32]  ──── WiFi/eSIM ────►  POST /api/sensors/ingest    │
+│  [Sensor ESP32]  ──── WiFi/eSIM ────►  POST /api/v1/sensors/ingest │
 │  - pH sensor                                                         │
 │  - Conductivity sensor                                               │
 │  - Temperature sensor (DS18B20)                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                  DASHBOARD (Next.js — App Router)                    │
+│                   Deploy separado en Vercel                          │
+│                                                                      │
+│  frontend/app/dashboard/                                            │
+│    ├── mapa/       → mapa-view.tsx (Leaflet, fishing_points/IPP)     │
+│    ├── graficas/   → graficas-view.tsx (histórico ambiental)         │
+│    ├── ia/         → ia-view.tsx (chat con Gemini vía /dashboard/ai) │
+│    └── sistema/    → estado de fuentes de datos (system-status)      │
+│                                                                      │
+│  frontend/app/api/{admin,data}/*  → route handlers Next.js que      │
+│  proxean al backend FastAPI (evitan exponer ADMIN_API_KEY al cliente)│
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -93,7 +121,24 @@ requirements.txt    ← dependencias Python
 
 ## Base de Datos — Esquema Principal
 
+Modelos ORM reales en `app/models/` (ver también [KNOWLEDGE_BASE.md](./KNOWLEDGE_BASE.md) §2):
+
 ```sql
+-- app/models/messaging.py
+-- Pescador identificado por wa_id (WhatsApp)
+users (id uuid PK, wa_id varchar UNIQUE, nombre varchar, comunidad varchar,
+       alertas_activas bool, created_at timestamptz, last_message_at timestamptz)
+
+-- Mensaje individual entrante/saliente de WhatsApp (nunca loggear body/wa_id)
+conversations (id uuid PK, user_id uuid FK→users, ...)
+
+-- Reporte de captura de un pescador, opcionalmente ligado a un fishing_point
+catch_reports (id uuid PK, user_id uuid FK→users, fishing_point_id uuid FK→fishing_points, ...)
+
+-- Registro de alertas enviadas (para no repetir notificaciones)
+alert_log (id uuid PK, ...)
+
+-- app/models/environmental.py
 -- Sensores IoT registrados (ESP32)
 sensors (id uuid PK, device_id varchar UNIQUE, api_key_hash varchar,
          location varchar, active bool, last_seen timestamptz, created_at timestamptz)
@@ -109,7 +154,7 @@ weather_snapshots (id uuid PK, source varchar DEFAULT 'open-meteo',
                    wind_speed_kmh float, wind_direction_deg float,
                    precipitation_mm float, created_at timestamptz)
 
--- Datos satelitales diarios (NASA ERDDAP / Copernicus)
+-- Datos satelitales diarios (NASA ERDDAP / NOAA CoastWatch, ver RESOLUCION_FUENTES.md)
 satellite_data (id uuid PK, source varchar, date date,
                 sst_celsius float, chlorophyll_mgm3 float, created_at timestamptz)
 
@@ -117,12 +162,21 @@ satellite_data (id uuid PK, source varchar, date date,
 external_alerts (id uuid PK, source varchar, alert_type varchar,
                  title text, description text, fetched_at timestamptz)
 
+-- Zonas de sedimentación (monitoreo territorial)
+sedimentation_zones (id uuid PK, ...)
+
 -- Semáforo diario cacheado (ranking IPP por zona)
 daily_semaphore (id uuid PK, date date UNIQUE, color varchar,
                  reason text, ipp_ranking jsonb, created_at timestamptz)
-```
 
-> **Nota:** Las tablas `users` y `conversations` (historial WhatsApp) están pendientes de implementar — ver flujo WhatsApp arriba.
+-- app/models/fishing_points.py — conocimiento territorial comunitario
+fishing_points (id uuid PK, nombre varchar, lat float, lng float,
+                sal_min float, sal_max float, especies jsonb, observacion text,
+                created_at timestamptz)
+
+-- app/models/dashboard.py — historial del asistente de IA en el dashboard
+ai_conversation (id uuid PK, ...)
+```
 
 ## Seguridad
 

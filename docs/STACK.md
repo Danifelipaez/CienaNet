@@ -41,6 +41,13 @@
 
 **Autenticación:** Token permanente de System User (no token de usuario de 60 días)
 
+### Frontend: Next.js (App Router) + Leaflet
+Dashboard científico, deploy Vercel separado del backend (`frontend/`, repo mismo, proyecto Vercel distinto):
+- **Next.js 16 (App Router) + TypeScript + React 19** — rutas `dashboard/{mapa,graficas,ia,sistema}`
+- **Leaflet** — mapa interactivo de puntos de pesca / zonas IPP (`components/map/`)
+- **Route handlers propios** (`frontend/app/api/{admin,data}/*`) — proxean al backend FastAPI en vez de exponer `ADMIN_API_KEY` al navegador
+- No usa un SDK de gráficos externo pesado; charts en `components/charts/` sobre datos de `/data/history`
+
 ### CI/CD: GitHub Actions + Vercel
 ```
 Push a main → Vercel auto-deploy (producción)
@@ -58,13 +65,14 @@ PR abierto  → Tests en GitHub Actions → Preview deploy
 - **Protocolo hacia API:** HTTP POST con JSON + API key en header
 - **Firmware:** Arduino IDE / PlatformIO
 
-### IA / NLU: proveedor agnóstico
-Para procesar mensajes de texto libre en WhatsApp:
-- Uso: clasificar intención del pescador, generar respuestas naturales
-- Fallback: respuestas predefinidas si no hay proveedor configurado
-- La interfaz está en `app/services/ai_service.py` (`AIProvider` Protocol)
-- El proveedor concreto se elige en `get_ai_provider()` sin tocar el resto del código
-- Candidatos: Groq (Llama, bajo costo), OpenAI, modelos locales vía Ollama, cualquier API compatible
+### IA / NLU: Google Gemini (AI Studio)
+Para procesar mensajes de texto libre en WhatsApp y las respuestas del asistente del dashboard:
+- Uso: clasificar intención del pescador, generar respuestas naturales, responder preguntas en el dashboard (`/dashboard/ai/ask`)
+- Fallback: respuestas predefinidas si `AI_API_KEY` está vacío (stub, sin IA)
+- La interfaz está en `app/services/ai_service.py` (`AIProvider` Protocol); la implementación activa es `GeminiProvider`, vía REST directo (httpx), sin SDK de Google
+- Modelo configurado en `AI_MODEL` (default `gemini-flash-lite-latest`, ajustar al id exacto de AI Studio)
+- Historial de contexto: últimos `AI_HISTORY_TURNS` mensajes (default 10)
+- El Protocol sigue permitiendo cambiar de proveedor en `get_ai_provider()` sin tocar el resto del código, pero hoy solo hay una implementación concreta (Gemini)
 
 ## Versiones Específicas
 
@@ -82,7 +90,7 @@ alembic             >= 1.13
 supabase            >= 2.9
 httpx               >= 0.27   # cliente HTTP async para Meta API
 python-dotenv       >= 1.0
-# Sin SDK de IA fijo — el proveedor se conecta en ai_service.py
+# IA: sin SDK — Gemini se llama por REST directo (httpx) desde ai_service.py
 pytest              >= 8.0
 pytest-asyncio      >= 0.24
 ```
@@ -90,9 +98,10 @@ pytest-asyncio      >= 0.24
 ## Variables de Entorno Requeridas
 
 ```bash
-# Base de datos Supabase — dos URLs por modelo serverless:
-DATABASE_URL_POOLER=      # Puerto 6543 (transaction mode) — runtime de la app
-DATABASE_URL_DIRECT=      # Puerto 5432 — solo para migraciones Alembic
+# Base de datos Supabase — dos URLs por modelo serverless
+# (nombres generados por la integración Vercel-Supabase, config.py los lee tal cual):
+POSTGRES_PRISMA_URL=       # Puerto 6543 (transaction pooler) — runtime de la app
+POSTGRES_URL_NON_POOLING=  # Puerto 5432 (directa) — solo para migraciones Alembic
 
 # Supabase API
 SUPABASE_URL=
@@ -104,8 +113,10 @@ WHATSAPP_PHONE_NUMBER_ID= # ID del número registrado en Meta
 WHATSAPP_VERIFY_TOKEN=    # Token para verificación de webhook
 WHATSAPP_APP_SECRET=      # Para validación HMAC de webhooks
 
-# IA / NLU (proveedor a definir)
+# IA / NLU (Google AI Studio / Gemini)
 AI_API_KEY=
+AI_MODEL=gemini-flash-lite-latest
+AI_HISTORY_TURNS=10
 
 # App
 ENVIRONMENT=              # development | staging | production
@@ -116,7 +127,7 @@ SENSOR_API_KEY_SECRET=    # Salt para hashear API keys de sensores
 
 | Tecnología | Razón de descarte |
 |------------|-------------------|
-| Next.js / Node backend | El equipo domina Python; no hay ventaja real |
+| Next.js / Node como **backend** | El equipo domina Python; no hay ventaja real. (Next.js sí se usa para el **frontend** — dashboard en `frontend/`, deploy Vercel separado — eso es una decisión distinta, no contradice esto) |
 | Twilio WhatsApp | Costo adicional por mensaje; somos estudiantes |
 | Firebase | Vendor lock-in, pricing impredecible |
 | MongoDB | SQL es mejor para datos de series temporales de sensores |

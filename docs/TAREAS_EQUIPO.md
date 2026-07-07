@@ -3,6 +3,8 @@
 > Objetivo del sprint: API que alimente el dashboard científico con datos ambientales en tiempo real e históricos.  
 > Equipo: Daniel (Ing. Sistemas / Tech Lead), Valentina (Ing. Sistemas / Dev), Diego (Ing. Civil / Datos)
 
+> **Estado: Sprint 1 completado.** Todas las tareas D-01..D-06 y V-01..V-07 están implementadas en el código actual (ver [ARCHITECTURE.md](./ARCHITECTURE.md) y [KNOWLEDGE_BASE.md](./KNOWLEDGE_BASE.md) para la estructura real). Este documento queda como referencia histórica de la planificación — los snippets de código de abajo son el diseño original y pueden diferir en detalle de la implementación final (ver notas inline donde aplica).
+
 ---
 
 ## Criterio de división
@@ -36,17 +38,19 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = ""
     supabase_url: str
     supabase_service_role_key: str
-    anthropic_api_key: str = ""
+    ai_api_key: str = ""
     sensor_api_key_secret: str
     environment: str = "development"
-    cienaga_lat: float = 10.8
-    cienaga_lon: float = -74.4
+    cienaga_lat: float = 10.859056
+    cienaga_lon: float = -74.460611
 
     class Config:
         env_file = ".env"
 
 settings = Settings()
 ```
+
+> Nota: el diseño original tenía `anthropic_api_key`; el proveedor de IA elegido fue Google Gemini, así que el campo real en `app/core/config.py` es `ai_api_key` + `ai_model` (ver STACK.md).
 
 ### D-03: `app/core/database.py`
 ```python
@@ -215,8 +219,8 @@ Diego puede trabajar desde el primer día en paralelo. Sus outputs (umbrales, fe
 
 ## Definición de "Done" para este sprint
 
-- [ ] `GET /data/latest` retorna datos reales (no mock) de Open-Meteo + NASA ERDDAP
-- [ ] Sensor ESP32 puede hacer `POST /sensors/ingest` con API key y los datos quedan en Supabase
-- [ ] Dashboard puede consumir la API (CORS configurado)
-- [ ] Datos históricos de 30 días disponibles en `GET /data/history`
-- [ ] Diego entregó umbrales revisados y tabla de fuentes IDEAM
+- [x] `GET /data/latest` retorna datos reales (no mock) de Open-Meteo + NASA ERDDAP
+- [x] Sensor ESP32 puede hacer `POST /sensors/ingest` con API key y los datos quedan en Supabase
+- [x] Dashboard puede consumir la API (CORS configurado, frontend Next.js desplegado)
+- [x] Datos históricos disponibles en `GET /data/history`
+- [ ] Diego entregó umbrales revisados y tabla de fuentes IDEAM — ver [IDEAM_GBIF_VALIDACION.md](./IDEAM_GBIF_VALIDACION.md) para estado

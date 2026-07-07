@@ -46,24 +46,34 @@ app/
 │       └── alerts_ext.py  # NOAA NHC ciclones
 │
 ├── models/
-│   ├── environmental.py   # ORM: sensor_readings, weather_snapshots, satellite_data
-│   ├── user.py            # ORM: users (pescadores)
-│   ├── conversation.py    # ORM: conversations
-│   └── alert.py           # ORM: alerts
+│   ├── environmental.py   # ORM: sensors, sensor_readings, weather_snapshots,
+│   │                      #      satellite_data, external_alerts,
+│   │                      #      sedimentation_zones, daily_semaphore
+│   ├── messaging.py       # ORM: users (pescadores), conversations, catch_reports, alert_log
+│   ├── fishing_points.py  # ORM: fishing_points (conocimiento territorial comunitario)
+│   └── dashboard.py       # ORM: ai_conversation (historial del asistente del dashboard)
 │
 ├── schemas/
-│   ├── sensor.py          # Pydantic: payload ESP32
-│   ├── whatsapp.py        # Pydantic: payload Meta webhook
-│   ├── environmental.py   # Pydantic: respuestas dashboard
-│   └── common.py          # APIResponse, Pagination
+│   ├── sensor.py          # Pydantic: SensorReadingIn (payload ESP32, una lectura por request)
+│   ├── environmental.py   # Pydantic: WeatherData, SatelliteSnapshot, DashboardSnapshot,
+│   │                      #      HistoryResponse, etc. — respuestas de /data/*
+│   └── dashboard.py       # Pydantic: AskRequest/AskResponse, AIHistoryItem — /dashboard/ai/*
 │
 └── main.py
 
 api/
 └── index.py               # Vercel entry point (Mangum)
+
+frontend/                  # Dashboard Next.js (App Router), deploy Vercel separado
+├── app/
+│   ├── dashboard/{mapa,graficas,ia,sistema}/page.tsx
+│   └── api/{admin,data}/*/route.ts   # Proxies al backend FastAPI
+└── components/{map,charts,ia,ui}/
 ```
 
 Regla de dependencias: `routers → services → models`. Los routers nunca tocan modelos directamente.
+
+No existe `app/schemas/whatsapp.py` ni `app/schemas/common.py` — los payloads del webhook de Meta se leen directo del `Request` JSON en `webhook.py` (sin schema Pydantic dedicado) y no hay wrapper `APIResponse`/`Pagination` genérico todavía.
 
 ---
 
@@ -101,8 +111,8 @@ retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 client = openmeteo_requests.Client(session=retry_session)
 
 PARAMS = {
-    "latitude": 10.8,
-    "longitude": -74.4,
+    "latitude": settings.cienaga_lat,   # centroide real, ver §12 — 10.859056
+    "longitude": settings.cienaga_lon,  # -74.460611
     "hourly": ["temperature_2m", "wind_speed_10m", "wind_direction_10m", "precipitation"],
     "timezone": "America/Bogota",
     "forecast_days": 3
@@ -468,31 +478,40 @@ async def latest_conditions(db=Depends(get_db)):
 
 ## 9. Variables de entorno requeridas
 
+Fuente de verdad: [.env.example](../.env.example) y `Settings` en `app/core/config.py` (los nombres deben coincidir exactamente, `pydantic-settings` los mapea case-insensitive a snake_case).
+
 ```bash
+# Base de datos Supabase — nombres generados por la integración Vercel-Supabase, no renombrar
+POSTGRES_PRISMA_URL=          # Pooler de transacción, puerto 6543 — runtime de la app
+POSTGRES_URL_NON_POOLING=     # Conexión directa, puerto 5432 — solo Alembic
+
 # Meta WhatsApp
 WHATSAPP_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
 WHATSAPP_VERIFY_TOKEN=
 WHATSAPP_APP_SECRET=          # Para HMAC
 
-# Supabase
+# Supabase API
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
 
-# IA / NLU (proveedor a definir — ver app/services/ai_service.py)
-AI_API_KEY=
+# IA / NLU — Google AI Studio / Gemini (ver app/services/ai_service.py, GeminiProvider)
+AI_API_KEY=                   # Vacío = stub sin IA
+AI_MODEL=gemini-flash-lite-latest
+AI_HISTORY_TURNS=10           # Mensajes previos que se mandan como contexto
 
-# Copernicus Marine (opcional, para backup SST)
+# Copernicus Marine (opcional, no usado en el flujo actual — clorofila migró a NOAA CoastWatch/Sentinel-3, ver RESOLUCION_FUENTES.md)
 COPERNICUSMARINE_SERVICE_USERNAME=
 COPERNICUSMARINE_SERVICE_PASSWORD=
 
 # App
 ENVIRONMENT=development
 SENSOR_API_KEY_SECRET=        # Salt para hashear API keys ESP32
+ADMIN_API_KEY=change-me       # Protege /admin/* (registro de sensores) y los proxies del dashboard
 
-# Coordenadas (defaults en config.py, no secretos)
-CIENAGA_LAT=10.8
-CIENAGA_LON=-74.4
+# Coordenadas (defaults en config.py, no secretos — centroide real, ver §12)
+CIENAGA_LAT=10.859056
+CIENAGA_LON=-74.460611
 ```
 
 ---
@@ -522,6 +541,27 @@ alembic>=1.13
 # SDK de IA: agregar el del proveedor elegido (ej: groq, openai, anthropic, etc.)
 mangum>=0.19          # Vercel
 ```
+
+---
+
+## 12. Coordenadas georreferenciadas de la Ciénaga Grande
+
+Puntos medidos en campo/equipo (no estimados), convertidos de DMS a decimal.
+La Ciénaga tiene forma aproximada de triángulo apuntando hacia el sur.
+
+| Punto | DMS | Decimal (lat, lon) | Uso |
+|-------|-----|---------------------|-----|
+| Vértice NE (Embarcadero Tasajera) | 10°58'34.0"N 74°19'33.0"W | 10.976111, -74.325833 | Extremo norte/derecho del triángulo |
+| Vértice Sur | 10°32'37"N 74°30'36"W | 10.543611, -74.510000 | Punta sur del triángulo |
+| Vértice NW | 11°00'34"N 74°40'55"W | 11.009444, -74.681944 | Extremo norte/izquierdo del triángulo |
+| Centroide | 10°51'32.6"N 74°27'38.2"W | 10.859056, -74.460611 | Usado como `CIENAGA_LAT`/`CIENAGA_LON` (ver `app/core/config.py`) |
+| Buenavista (palafito) | 10°50'28.8"N 74°30'36.5"W | 10.841333, -74.510139 | Pueblo palafítico de referencia |
+| Nueva Venecia (palafito) | 10°49'43.3"N 74°34'28.2"W | 10.828694, -74.574500 | Pueblo palafítico de referencia |
+
+Notas:
+- El bounding box de NASA ERDDAP (`app/services/ingestion/satellite.py`, `LAT_MIN/MAX = 10.5/11.2`, `LON_MIN/MAX = -74.85/-73.9`) ya cubre los 3 vértices reales, no requiere cambios.
+- `CIENAGA_LAT`/`CIENAGA_LON` (config.py y `.env.example`) se actualizaron de `10.8, -74.4` (aproximado) al centroide real `10.859056, -74.460611`.
+- Los puntos de pesca en `alembic/versions/003_fishing_points.py` (incluyendo un punto llamado "Tasajera" en `10.972, -74.434`) son datos comunitarios ilustrativos, no coinciden con estas coordenadas medidas — pendiente de validar/corregir con el equipo territorial si se requiere precisión geográfica real en ese seed data.
 
 ---
 

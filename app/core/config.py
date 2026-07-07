@@ -33,8 +33,9 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     # Coordenadas centro de la Ciénaga Grande (no secretos)
-    cienaga_lat: float = 10.8
-    cienaga_lon: float = -74.4
+    # Centroide real medido (ver docs/KNOWLEDGE_BASE.md #12)
+    cienaga_lat: float = 10.859056
+    cienaga_lon: float = -74.460611
 
     # ERDDAP — dataset ids versionados en config, no en código:
     # pueden cambiar si NOAA/Copernicus actualizan el producto satelital.

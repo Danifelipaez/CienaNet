@@ -24,17 +24,23 @@ Meta Developer Dashboard
 
 Meta hace un GET al webhook para verificarlo:
 
+Implementación real en `app/api/v1/routers/webhook.py` (router con `prefix="/webhook"`, montado bajo `/api/v1`):
+
 ```python
-@router.get("/webhook/whatsapp")
+router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+@router.get("/whatsapp")
 async def verify_webhook(
     hub_mode: str = Query(alias="hub.mode"),
     hub_challenge: str = Query(alias="hub.challenge"),
     hub_verify_token: str = Query(alias="hub.verify_token"),
 ):
-    if hub_mode == "subscribe" and hub_verify_token == settings.WHATSAPP_VERIFY_TOKEN:
+    if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_verify_token:
         return PlainTextResponse(hub_challenge)
     raise HTTPException(status_code=403)
 ```
+
+Nota: `settings` es la instancia de `Settings` (pydantic-settings) en `app/core/config.py` — los atributos son snake_case (`whatsapp_verify_token`), no el nombre de la env var en mayúsculas.
 
 ---
 
@@ -42,22 +48,24 @@ async def verify_webhook(
 
 ### Validación HMAC (OBLIGATORIA)
 
+Ya implementada como `verify_hmac_meta()` en `app/core/security.py` — no reimplementar, importar de ahí:
+
 ```python
 import hmac
 import hashlib
 
-def validate_whatsapp_signature(payload: bytes, signature: str, app_secret: str) -> bool:
+def verify_hmac_meta(payload: bytes, signature_header: str) -> bool:
     """
     Valida que el webhook viene de Meta y no de un tercero.
-    signature viene en el header X-Hub-Signature-256 como "sha256=<hash>"
+    signature_header viene en el header X-Hub-Signature-256 como "sha256=<hash>"
     """
     expected = hmac.new(
-        app_secret.encode(),
+        settings.whatsapp_app_secret.encode(),
         payload,
         hashlib.sha256
     ).hexdigest()
-    
-    received = signature.replace("sha256=", "")
+
+    received = signature_header.removeprefix("sha256=")
     return hmac.compare_digest(expected, received)
 ```
 

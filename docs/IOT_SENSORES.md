@@ -66,35 +66,34 @@ void loop() {
 ### Endpoint de Ingesta
 ```
 POST /api/v1/sensors/ingest
-Authorization: Bearer {SENSOR_API_KEY}
+X-Api-Key: {SENSOR_API_KEY}
 Content-Type: application/json
 ```
+
+> **Nota (actualizada a la implementación real, `app/schemas/sensor.py` + `app/api/v1/routers/sensors.py`):**
+> el endpoint acepta **una sola lectura por request** (no un array `readings[]`). El firmware que
+> acumula buffer local debe hacer un POST por lectura al reconectar, no un único POST con varias.
+> La autenticación es por header `X-Api-Key` (no `Authorization: Bearer`) — ver `get_current_sensor()`
+> en `app/api/v1/dependencies.py`.
 
 ### Payload
 ```json
 {
   "sensor_id": "CGSM-001",
-  "readings": [
-    {
-      "ph": 7.4,
-      "conductivity_ms": 12.5,
-      "temperature_c": 28.3,
-      "timestamp": "2025-06-20T14:30:00Z",
-      "battery_mv": 3700,
-      "signal_rssi": -65
-    }
-  ]
+  "timestamp": "2025-06-20T14:30:00Z",
+  "ph": 7.4,
+  "conductivity_mscm": 12.5,
+  "temperature_c": 28.3,
+  "water_level_cm": 45.2
 }
 ```
 
-El array `readings` permite enviar múltiples lecturas acumuladas de una vez (buffer local).
+Campos opcionales (`ph`, `conductivity_mscm`, `temperature_c`, `water_level_cm`) — enviar `null` u omitir los que el sensor no mida. `battery_mv`/`signal_rssi` aún no están en el schema; si se necesitan, agregar campos a `SensorReadingIn`.
 
 ### Respuesta esperada
 ```json
 {
-  "status": "ok",
-  "stored": 1,
-  "alerts_triggered": []
+  "status": "ok"
 }
 ```
 
@@ -130,6 +129,8 @@ Basados en estudios de la Ciénaga Grande de Santa Marta (INVEMAR):
 | Temperatura (°C) | 25 – 32 | > 34 | > 36 |
 
 **Nota:** Estos umbrales deben validarse con pescadores locales y con Diego (análisis territorial). Los valores del INVEMAR son referencia, no son absolutos.
+
+**Nota de implementación:** estos rangos no se enforcen en `POST /sensors/ingest` — el endpoint solo valida y persiste la lectura (`process_reading()` en `app/services/sensor_service.py`). La evaluación de alerta ocurre después, sobre el snapshot agregado, en `app/services/semaphore.py` y `app/services/alert_service.py`.
 
 ---
 
