@@ -83,7 +83,14 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     await _save_weather(db, weather_data)
     await _save_satellite(db, satellite_data, today)
     await _upsert_semaphore(db, today, semaphore, ipp)
-    await _save_ideam_hidro(db, ideam_precipitacion, ideam_nivel_rio)
+    try:
+        await _save_ideam_hidro(db, ideam_precipitacion, ideam_nivel_rio)
+    except Exception as exc:
+        # No fatal: get_latest_snapshot() lo llama también message_router.py (bot
+        # de WhatsApp) — un fallo de respaldo (p.ej. migración 008 aún no aplicada
+        # en esta DB) no debe romper la respuesta al pescador ni el cron de Vercel.
+        logger.warning("No se pudo guardar respaldo IDEAM en DB: %s", exc)
+        await db.rollback()
 
     return {
         "semaphore": {

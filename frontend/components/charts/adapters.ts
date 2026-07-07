@@ -1,5 +1,12 @@
-import type { WeatherHistoryPoint, SatelliteHistoryPoint, CatchHistoryPoint, SemaphoreHistoryPoint } from "@/lib/api";
-import type { SeriesPoint } from "@/components/ui/charts";
+import type {
+  WeatherHistoryPoint,
+  SatelliteHistoryPoint,
+  CatchHistoryPoint,
+  SemaphoreHistoryPoint,
+  IdeamPrecipitacionPoint,
+  IdeamNivelPoint,
+} from "@/lib/api";
+import type { SeriesPoint, MultiSeries } from "@/components/ui/charts";
 
 function shortDate(iso: string) {
   const d = new Date(iso);
@@ -59,6 +66,32 @@ export function toCorrelacion(satellite: SatelliteHistoryPoint[], captura: Catch
   return satellite
     .filter((s) => s.chlorophyll_mgm3 != null && byDate.has(s.date))
     .map((s) => ({ cloro: s.chlorophyll_mgm3!, captura: byDate.get(s.date)! }));
+}
+
+const IDEAM_COLORS = ["var(--teal)", "var(--salmon)"];
+
+function groupByEstacion<T extends { date: string; estacion: string }>(
+  rows: T[],
+  valueKey: keyof T
+): MultiSeries[] {
+  const porEstacion = new Map<string, SeriesPoint[]>();
+  for (const r of rows) {
+    if (!porEstacion.has(r.estacion)) porEstacion.set(r.estacion, []);
+    porEstacion.get(r.estacion)!.push({ x: r.date, v: Number(r[valueKey]) });
+  }
+  return [...porEstacion.entries()].map(([estacion, pts], i) => ({
+    label: estacion,
+    color: IDEAM_COLORS[i % IDEAM_COLORS.length],
+    data: pts.sort((a, b) => a.x.localeCompare(b.x)).map((p) => ({ x: shortDate(p.x), v: p.v })),
+  }));
+}
+
+export function ideamPrecipitacionToSeries(rows: IdeamPrecipitacionPoint[]): MultiSeries[] {
+  return groupByEstacion(rows, "precipitacion_mm");
+}
+
+export function ideamNivelToSeries(rows: IdeamNivelPoint[]): MultiSeries[] {
+  return groupByEstacion(rows, "nivel_m");
 }
 
 /** Normaliza colores del backend ("green"/"yellow"/"red" o "verde"/"amarillo"/"rojo") a tono ES. */

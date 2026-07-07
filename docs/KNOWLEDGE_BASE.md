@@ -48,7 +48,8 @@ app/
 ├── models/
 │   ├── environmental.py   # ORM: sensors, sensor_readings, weather_snapshots,
 │   │                      #      satellite_data, external_alerts,
-│   │                      #      sedimentation_zones, daily_semaphore
+│   │                      #      sedimentation_zones, daily_semaphore,
+│   │                      #      ideam_hidro_readings
 │   ├── messaging.py       # ORM: users (pescadores), conversations, catch_reports, alert_log
 │   ├── fishing_points.py  # ORM: fishing_points (conocimiento territorial comunitario)
 │   └── dashboard.py       # ORM: ai_conversation (historial del asistente del dashboard)

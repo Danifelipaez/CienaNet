@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/ui/icon";
 import { Card, CardGrid } from "@/components/ui/card";
 import { MonoChip, Pill, StatusDot } from "@/components/ui/primitives";
-import { LineChart, ScatterChart, MoonGlyph } from "@/components/ui/charts";
+import { LineChart, ScatterChart, MultiLineChart, MoonGlyph } from "@/components/ui/charts";
 import type { HistoryResponse } from "@/lib/api";
 import {
   weatherToVientoSeries,
@@ -15,6 +15,8 @@ import {
   catchToSeries,
   toCorrelacion,
   semaphoreToEventos,
+  ideamPrecipitacionToSeries,
+  ideamNivelToSeries,
 } from "./adapters";
 import { moonPhaseGlyph, moonPhaseLabel } from "@/lib/moon";
 
@@ -86,6 +88,8 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
   const tempSerie = useMemo(() => satelliteToTempSeries(history.satellite), [history]);
   const cloroSerie = useMemo(() => satelliteToChloroSeries(history.satellite), [history]);
   const capturaSerie = useMemo(() => catchToSeries(history.captura), [history]);
+  const precipIdeamSerie = useMemo(() => ideamPrecipitacionToSeries(history.ideam_precipitacion), [history]);
+  const nivelIdeamSerie = useMemo(() => ideamNivelToSeries(history.ideam_nivel_rio), [history]);
 
   function exportCSV() {
     const n = Math.max(vientoSerie.length, tempSerie.length, cloroSerie.length, capturaSerie.length);
@@ -194,6 +198,41 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
         >
           {cloroSerie.length > 1 ? (
             <LineChart data={cloroSerie} height={190} color="var(--verde-sem)" area yMin={0} annotations={[{ i: cloroPeak, label: "Pico" }]} />
+          ) : (
+            <EmptySeries />
+          )}
+        </Card>
+
+        <Card
+          title="Precipitación en la cuenca"
+          label="IDEAM — Media Luna / La Gran Vía"
+          span={6}
+          motif="raya"
+          actions={
+            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+              mm/día
+            </span>
+          }
+        >
+          {precipIdeamSerie.some((s) => s.data.length > 1) ? (
+            <MultiLineChart series={precipIdeamSerie} height={190} yMin={0} area />
+          ) : (
+            <EmptySeries />
+          )}
+        </Card>
+        <Card
+          title="Nivel de ríos tributarios"
+          label="IDEAM — Puerto Rico Hacienda / Ganadería Caribe"
+          span={6}
+          motif="mangle"
+          actions={
+            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+              metros
+            </span>
+          }
+        >
+          {nivelIdeamSerie.some((s) => s.data.length > 1) ? (
+            <MultiLineChart series={nivelIdeamSerie} height={190} yMin={0} />
           ) : (
             <EmptySeries />
           )}

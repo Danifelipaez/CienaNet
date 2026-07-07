@@ -92,11 +92,25 @@ export interface CatchHistoryPoint {
   cantidad_indice: number;
 }
 
+export interface IdeamPrecipitacionPoint {
+  date: string;
+  estacion: string;
+  precipitacion_mm: number;
+}
+
+export interface IdeamNivelPoint {
+  date: string;
+  estacion: string;
+  nivel_m: number;
+}
+
 export interface HistoryResponse {
   weather: WeatherHistoryPoint[];
   semaphore: SemaphoreHistoryPoint[];
   satellite: SatelliteHistoryPoint[];
   captura: CatchHistoryPoint[];
+  ideam_precipitacion: IdeamPrecipitacionPoint[];
+  ideam_nivel_rio: IdeamNivelPoint[];
 }
 
 export const getHistory = (days = 30) => backendFetch<HistoryResponse>(`/data/history?days=${days}`);

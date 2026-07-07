@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 export type SeriesPoint = { x: string; v: number };
+export type MultiSeries = { label: string; color: string; data: SeriesPoint[] };
 
 export function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
   const ref = useRef<HTMLDivElement>(null);
@@ -186,6 +187,116 @@ export function LineChart({
           </g>
         )}
       </svg>
+    </div>
+  );
+}
+
+/** Varias series sobre un eje X compartido (unión ordenada de sus fechas) — sin hover, a diferencia de LineChart. */
+export function MultiLineChart({
+  series,
+  height = 200,
+  yMin,
+  yMax,
+  area = false,
+}: {
+  series: MultiSeries[];
+  height?: number;
+  yMin?: number;
+  yMax?: number;
+  area?: boolean;
+}) {
+  const [ref, w] = useWidth();
+  const padL = 38,
+    padR = 14,
+    padT = 18,
+    padB = 26;
+  const categories = Array.from(new Set(series.flatMap((s) => s.data.map((d) => d.x)))).sort();
+  const vals = series.flatMap((s) => s.data.map((d) => d.v));
+  const [mn, mx] = paddedDomain(vals.length ? vals : [0, 1], yMin, yMax);
+  const range = mx - mn || 1;
+  const iw = Math.max(10, w - padL - padR),
+    ih = height - padT - padB;
+  const X = (i: number) => padL + (i / Math.max(1, categories.length - 1)) * iw;
+  const Y = (v: number) => padT + ih - ((v - mn) / range) * ih;
+  const xTickCount = Math.min(5, categories.length);
+  const xTicks = Array.from(
+    new Set(
+      Array.from({ length: xTickCount }, (_, k) =>
+        Math.round((k / Math.max(1, xTickCount - 1)) * (categories.length - 1))
+      )
+    )
+  );
+  const yTicks = [0, 0.25, 0.5, 0.75, 1];
+
+  return (
+    <div ref={ref} style={{ width: "100%" }}>
+      <svg width={w} height={height} style={{ display: "block", overflow: "visible" }}>
+        {yTicks.map((g, i) => (
+          <line
+            key={i}
+            x1={padL}
+            x2={w - padR}
+            y1={padT + ih * (1 - g)}
+            y2={padT + ih * (1 - g)}
+            stroke="var(--border)"
+            strokeWidth="1"
+            strokeDasharray="2 5"
+          />
+        ))}
+        {yTicks.map((g, i) => (
+          <text
+            key={i}
+            x={padL - 6}
+            y={padT + ih * (1 - g) + 3}
+            textAnchor="end"
+            className="mono"
+            fontSize="10"
+            fill="var(--ink-faint)"
+          >
+            {fmtAxisValue(mn + range * g)}
+          </text>
+        ))}
+        {series.map((s, si) => {
+          const pts = s.data
+            .map((d) => ({ i: categories.indexOf(d.x), v: d.v }))
+            .filter((p) => p.i >= 0)
+            .sort((a, b) => a.i - b.i);
+          if (pts.length < 2) return null;
+          const line = pts.map((p, i) => (i ? "L" : "M") + X(p.i).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ");
+          const areaP = area
+            ? line + ` L ${X(pts[pts.length - 1].i).toFixed(1)} ${padT + ih} L ${X(pts[0].i).toFixed(1)} ${padT + ih} Z`
+            : null;
+          return (
+            <g key={si}>
+              {areaP && <path d={areaP} fill={s.color} fillOpacity="0.1" />}
+              <path d={line} fill="none" stroke={s.color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+            </g>
+          );
+        })}
+        {xTicks.map((ti, i) => (
+          <text
+            key={i}
+            x={X(ti)}
+            y={height - 7}
+            textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"}
+            className="mono"
+            fontSize="10.5"
+            fill="var(--ink-faint)"
+          >
+            {categories[ti]}
+          </text>
+        ))}
+      </svg>
+      <div style={{ display: "flex", gap: 14, marginTop: 4, flexWrap: "wrap" }}>
+        {series.map((s, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: s.color, display: "inline-block" }} />
+            <span className="mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+              {s.label}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

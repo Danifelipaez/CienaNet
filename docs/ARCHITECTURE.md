@@ -45,6 +45,8 @@
                     │  - daily_semaphore│
                     │  - fishing_points │
                     │  - ai_conversation│
+                    │  - ideam_hidro_   │
+                    │    readings       │
                     └───────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -168,6 +170,13 @@ sedimentation_zones (id uuid PK, ...)
 -- Semáforo diario cacheado (ranking IPP por zona)
 daily_semaphore (id uuid PK, date date UNIQUE, color varchar,
                  reason text, ipp_ranking jsonb, created_at timestamptz)
+
+-- Respaldo propio de IDEAM en vivo (precipitación/nivel de río), guardado por el
+-- cron diario (GET /data/latest) — la API pública de Socrata sigue siendo la
+-- fuente de /data/history, esta tabla es solo respaldo (ver ideam_hidro.py)
+ideam_hidro_readings (id uuid PK, variable varchar, estacion varchar, date date,
+                      valor float, created_at timestamptz,
+                      UNIQUE(variable, estacion, date))
 
 -- app/models/fishing_points.py — conocimiento territorial comunitario
 fishing_points (id uuid PK, nombre varchar, lat float, lng float,
