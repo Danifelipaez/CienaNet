@@ -130,6 +130,9 @@ html, body {
 @keyframes cr-blink { 0%,100%{opacity:1;} 50%{opacity:.3;} }
 @keyframes cr-dots { 0%,80%,100%{ transform:translateY(0); opacity:.4;} 40%{ transform:translateY(-4px); opacity:1;} }
 @keyframes cr-fade-up { from{ transform:translateY(9px);} to{ transform:none;} }
+/* Esqueleto de carga (loading.tsx): shimmer suave mientras llega el dato real. */
+@keyframes cr-shimmer { 0%{ background-position:-360px 0;} 100%{ background-position:360px 0;} }
+.cr-skel{ border-radius:var(--radius-sm); background:linear-gradient(90deg,var(--surface-3) 25%,var(--surface-2) 50%,var(--surface-3) 75%); background-size:720px 100%; animation:cr-shimmer 1.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }

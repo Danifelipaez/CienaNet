@@ -228,12 +228,15 @@ async def _save_satellite(db: AsyncSession, data: dict, today: date) -> None:
     sat_date_str = data.get("date") or today.isoformat()
     sat_date = date.fromisoformat(sat_date_str)
 
+    # limit(1): satellite_data no tiene unique en (date, source), así que un día ya
+    # puede tener duplicados; la comprobación "¿existe ya?" debe tolerarlos sin
+    # reventar (mismo criterio que el read DB-first y _save_weather).
     existing = (
         await db.execute(
             select(SatelliteData).where(
                 SatelliteData.date == sat_date,
                 SatelliteData.source == "nasa_mur",
-            )
+            ).limit(1)
         )
     ).scalar_one_or_none()
 
@@ -268,7 +271,7 @@ async def _save_ideam_hidro(db: AsyncSession, precipitacion: list[dict], nivel: 
                     IdeamHidroReading.variable == variable,
                     IdeamHidroReading.estacion == estacion,
                     IdeamHidroReading.date == row_date,
-                )
+                ).limit(1)  # tolera duplicados en la comprobación de existencia
             )
         ).scalar_one_or_none()
         if existing:
