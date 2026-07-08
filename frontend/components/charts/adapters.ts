@@ -7,19 +7,7 @@ import type {
   IdeamNivelPoint,
 } from "@/lib/api";
 import type { SeriesPoint, MultiSeries } from "@/components/ui/charts";
-
-function shortDate(iso: string) {
-  const d = new Date(iso);
-  const mes = d.toLocaleDateString("es-CO", { month: "short" }).replace(".", "");
-  return `${String(d.getDate()).padStart(2, "0")} ${mes.charAt(0).toUpperCase()}${mes.slice(1)}`;
-}
-
-/** Como shortDate pero con hora — MultiLineChart dedup por etiqueta de x, sin la hora
- * varios puntos del mismo día colapsarían en una sola columna. */
-function shortDateHora(iso: string) {
-  const d = new Date(iso);
-  return `${shortDate(iso)} ${String(d.getHours()).padStart(2, "0")}h`;
-}
+import { formatDate } from "./time-format";
 
 function avg(vals: number[]): number {
   return vals.reduce((a, b) => a + b, 0) / vals.length;
@@ -52,16 +40,16 @@ function weatherMultiSeries(
 
     let data: SeriesPoint[];
     if (vista === "hora") {
-      data = propias.map((r) => ({ x: shortDateHora(r.timestamp), v: r.v }));
+      data = propias.map((r) => ({ t: r.timestamp, v: r.v }));
     } else {
       const dias = promedioPorDia(propias);
       if (vista === "dia") {
-        data = dias.map(({ dia, promedio }) => ({ x: shortDate(dia), v: promedio }));
+        data = dias.map(({ dia, promedio }) => ({ t: dia, v: promedio }));
       } else {
         const semanas: SeriesPoint[] = [];
         for (let i = 0; i < dias.length; i += 7) {
           const semana = dias.slice(i, i + 7);
-          semanas.push({ x: shortDate(semana[0].dia), v: avg(semana.map((d) => d.promedio)) });
+          semanas.push({ t: semana[0].dia, v: avg(semana.map((d) => d.promedio)) });
         }
         data = semanas;
       }
@@ -83,22 +71,22 @@ export function weatherToHumedadMulti(rows: WeatherHistoryPoint[], vista: VistaC
 }
 
 export function satelliteToTempSeries(rows: SatelliteHistoryPoint[]): SeriesPoint[] {
-  return rows.filter((r) => r.sst_celsius != null).map((r) => ({ x: shortDate(r.date), v: r.sst_celsius! }));
+  return rows.filter((r) => r.sst_celsius != null).map((r) => ({ t: r.date, v: r.sst_celsius! }));
 }
 
 export function satelliteToChloroSeries(rows: SatelliteHistoryPoint[]): SeriesPoint[] {
-  return rows.filter((r) => r.chlorophyll_mgm3 != null).map((r) => ({ x: shortDate(r.date), v: r.chlorophyll_mgm3! }));
+  return rows.filter((r) => r.chlorophyll_mgm3 != null).map((r) => ({ t: r.date, v: r.chlorophyll_mgm3! }));
 }
 
 export function catchToSeries(rows: CatchHistoryPoint[]): SeriesPoint[] {
-  return rows.map((r) => ({ x: shortDate(r.date), v: r.cantidad_indice }));
+  return rows.map((r) => ({ t: r.date, v: r.cantidad_indice }));
 }
 
 export function toCorrelacion(satellite: SatelliteHistoryPoint[], captura: CatchHistoryPoint[]) {
   const byDate = new Map(captura.map((c) => [c.date, c.cantidad_indice]));
   return satellite
     .filter((s) => s.chlorophyll_mgm3 != null && byDate.has(s.date))
-    .map((s) => ({ cloro: s.chlorophyll_mgm3!, captura: byDate.get(s.date)! }));
+    .map((s) => ({ cloro: s.chlorophyll_mgm3!, captura: byDate.get(s.date)!, date: s.date }));
 }
 
 const IDEAM_COLORS = ["var(--teal)", "var(--salmon)"];
@@ -110,12 +98,12 @@ function groupByEstacion<T extends { date: string; estacion: string }>(
   const porEstacion = new Map<string, SeriesPoint[]>();
   for (const r of rows) {
     if (!porEstacion.has(r.estacion)) porEstacion.set(r.estacion, []);
-    porEstacion.get(r.estacion)!.push({ x: r.date, v: Number(r[valueKey]) });
+    porEstacion.get(r.estacion)!.push({ t: r.date, v: Number(r[valueKey]) });
   }
   return [...porEstacion.entries()].map(([estacion, pts], i) => ({
     label: estacion,
     color: IDEAM_COLORS[i % IDEAM_COLORS.length],
-    data: pts.sort((a, b) => a.x.localeCompare(b.x)).map((p) => ({ x: shortDate(p.x), v: p.v })),
+    data: pts.sort((a, b) => a.t.localeCompare(b.t)),
   }));
 }
 
@@ -157,7 +145,7 @@ export function semaphoreToEventos(rows: SemaphoreHistoryPoint[]): EventoHistori
     const start = rows[i].date,
       end = rows[j - 1].date;
     eventos.push({
-      fecha: start === end ? shortDate(start) : `${shortDate(start)}–${shortDate(end)}`,
+      fecha: start === end ? formatDate(start) : `${formatDate(start)}–${formatDate(end)}`,
       tipo: tono === "rojo" ? "Alerta crítica" : "Precaución",
       sem: tono,
       variable: rows[i].reason ?? "",

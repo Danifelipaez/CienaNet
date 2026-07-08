@@ -1,8 +1,9 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { formatAxisTick, formatTooltipHeader, type ChartGranularity } from "@/components/charts/time-format";
 
-export type SeriesPoint = { x: string; v: number };
+export type SeriesPoint = { t: string; v: number };
 export type MultiSeries = { label: string; color: string; data: SeriesPoint[] };
 
 export function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
@@ -37,28 +38,31 @@ function paddedDomain(vals: number[], floor?: number, ceil?: number): [number, n
   return [lo, hi];
 }
 
-export function LineChart({
-  data,
+/**
+ * Gráfica de series de tiempo — una o varias series sobre un eje X compartido. Reemplaza los antiguos
+ * `LineChart`/`MultiLineChart`: toda gráfica de serie de tiempo pasa por aquí, así que hover, leyenda
+ * y convenciones son siempre las mismas sin importar cuántas series traiga.
+ */
+export function TimeSeriesChart({
+  series,
+  granularity,
+  aggregated = false,
   height = 200,
-  color = "var(--verde)",
-  fill = false,
-  annotations = [],
   yMin,
   yMax,
   area = false,
   dashGrid = true,
+  annotations = [],
 }: {
-  data: SeriesPoint[];
+  series: MultiSeries[];
+  granularity: ChartGranularity;
+  aggregated?: boolean;
   height?: number;
-  color?: string;
-  fill?: boolean;
-  unit?: string;
-  annotations?: { i: number; label: string }[];
-  /** Piso/techo físico opcional (p.ej. 0 para valores que no pueden ser negativos) — no es el límite exacto del eje, el eje siempre añade el margen del 20%. */
   yMin?: number;
   yMax?: number;
   area?: boolean;
   dashGrid?: boolean;
+  annotations?: { seriesIndex: number; pointIndex: number; label: string }[];
 }) {
   const [ref, w] = useWidth();
   const [hover, setHover] = useState<number | null>(null);
@@ -66,34 +70,37 @@ export function LineChart({
     padR = 14,
     padT = 18,
     padB = 26;
-  const vals = data.map((d) => d.v);
-  const [mn, mx] = paddedDomain(vals, yMin, yMax);
+  const categories = Array.from(new Set(series.flatMap((s) => s.data.map((d) => d.t)))).sort();
+  const vals = series.flatMap((s) => s.data.map((d) => d.v));
+  const [mn, mx] = paddedDomain(vals.length ? vals : [0, 1], yMin, yMax);
   const range = mx - mn || 1;
   const iw = Math.max(10, w - padL - padR),
     ih = height - padT - padB;
-  const X = (i: number) => padL + (i / Math.max(1, data.length - 1)) * iw;
+  const X = (i: number) => padL + (i / Math.max(1, categories.length - 1)) * iw;
   const Y = (v: number) => padT + ih - ((v - mn) / range) * ih;
-  const pts = data.map((d, i) => [X(i), Y(d.v)]);
-  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
-  const areaP = line + ` L ${X(data.length - 1).toFixed(1)} ${padT + ih} L ${padL} ${padT + ih} Z`;
-  const xTickCount = Math.min(5, data.length);
+  const xTickCount = Math.min(5, categories.length);
   const xTicks = Array.from(
     new Set(
       Array.from({ length: xTickCount }, (_, k) =>
-        Math.round((k / Math.max(1, xTickCount - 1)) * (data.length - 1))
+        Math.round((k / Math.max(1, xTickCount - 1)) * (categories.length - 1))
       )
     )
   );
   const yTicks = [0, 0.25, 0.5, 0.75, 1];
-  const gid = "g" + Math.abs(color.length * 7 + data.length).toString(36);
-  const hoverPt = hover != null ? data[hover] : null;
 
   function handleMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
-    const idx = Math.round(((px - padL) / iw) * (data.length - 1));
-    setHover(Math.max(0, Math.min(data.length - 1, idx)));
+    const idx = Math.round(((px - padL) / iw) * (categories.length - 1));
+    setHover(Math.max(0, Math.min(categories.length - 1, idx)));
   }
+
+  const hoverRows =
+    hover != null
+      ? series
+          .map((s) => ({ s, pt: s.data.find((d) => d.t === categories[hover]) }))
+          .filter((r): r is { s: MultiSeries; pt: SeriesPoint } => r.pt != null)
+      : [];
 
   return (
     <div ref={ref} style={{ width: "100%" }}>
@@ -104,12 +111,6 @@ export function LineChart({
         onMouseMove={handleMove}
         onMouseLeave={() => setHover(null)}
       >
-        <defs>
-          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.16" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
-          </linearGradient>
-        </defs>
         {dashGrid &&
           yTicks.map((g, i) => (
             <line
@@ -136,14 +137,32 @@ export function LineChart({
             {fmtAxisValue(mn + range * g)}
           </text>
         ))}
-        {(area || fill) && <path d={areaP} fill={`url(#${gid})`} />}
-        <path d={line} fill="none" stroke={color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+        {series.map((s, si) => {
+          const pts = s.data
+            .map((d) => ({ i: categories.indexOf(d.t), v: d.v }))
+            .filter((p) => p.i >= 0)
+            .sort((a, b) => a.i - b.i);
+          if (pts.length < 2) return null;
+          const line = pts.map((p, i) => (i ? "L" : "M") + X(p.i).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ");
+          const areaP = area
+            ? line + ` L ${X(pts[pts.length - 1].i).toFixed(1)} ${padT + ih} L ${X(pts[0].i).toFixed(1)} ${padT + ih} Z`
+            : null;
+          return (
+            <g key={si}>
+              {areaP && <path d={areaP} fill={s.color} fillOpacity="0.1" />}
+              <path d={line} fill="none" stroke={s.color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
+            </g>
+          );
+        })}
         {annotations.map((a, i) => {
-          const x = X(a.i),
-            y = Y(data[a.i].v);
+          const pt = series[a.seriesIndex]?.data[a.pointIndex];
+          const ci = pt ? categories.indexOf(pt.t) : -1;
+          if (!pt || ci < 0) return null;
+          const x = X(ci),
+            y = Y(pt.v);
           return (
             <g key={i}>
-              <circle cx={x} cy={y} r="3.5" fill={color} stroke="var(--surface)" strokeWidth="1.5" />
+              <circle cx={x} cy={y} r="3.5" fill={series[a.seriesIndex].color} stroke="var(--surface)" strokeWidth="1.5" />
               <text x={x} y={y - 10} textAnchor="middle" className="mono" fontSize="10" fill="var(--teal)" fontWeight="600">
                 {a.label}
               </text>
@@ -160,132 +179,42 @@ export function LineChart({
             fontSize="10.5"
             fill="var(--ink-faint)"
           >
-            {data[ti].x}
+            {formatAxisTick(categories[ti], granularity)}
           </text>
         ))}
-        {hoverPt && (
+        {hover != null && hoverRows.length > 0 && (
           <g>
-            <line x1={X(hover!)} x2={X(hover!)} y1={padT} y2={padT + ih} stroke={color} strokeOpacity="0.35" strokeWidth="1" />
-            <circle cx={X(hover!)} cy={Y(hoverPt.v)} r="4" fill={color} stroke="var(--surface)" strokeWidth="1.5" />
+            <line x1={X(hover)} x2={X(hover)} y1={padT} y2={padT + ih} stroke="var(--ink-faint)" strokeOpacity="0.35" strokeWidth="1" />
+            {hoverRows.map(({ s, pt }, i) => (
+              <circle key={i} cx={X(hover)} cy={Y(pt.v)} r="4" fill={s.color} stroke="var(--surface)" strokeWidth="1.5" />
+            ))}
             {(() => {
-              const tw = 60,
-                th = 34;
-              const boxX = Math.min(Math.max(X(hover!) - tw / 2, padL), w - padR - tw);
-              const boxY = Math.max(Y(hoverPt.v) - th - 10, 2);
+              const header = formatTooltipHeader(categories[hover], granularity, aggregated);
+              const maxChars = Math.max(header.length, ...hoverRows.map((r) => `${r.s.label} ${fmtAxisValue(r.pt.v)}`.length));
+              const tw = Math.max(74, maxChars * 5.6 + 16);
+              const th = 18 + hoverRows.length * 14 + 6;
+              const topY = Math.min(...hoverRows.map((r) => Y(r.pt.v)));
+              const boxX = Math.min(Math.max(X(hover) - tw / 2, padL), w - padR - tw);
+              const boxY = Math.max(topY - th - 10, 2);
               return (
                 <g>
                   <rect x={boxX} y={boxY} width={tw} height={th} rx="6" fill="var(--surface)" stroke="var(--border)" />
-                  <text x={boxX + tw / 2} y={boxY + 15} textAnchor="middle" className="mono" fontSize="11" fontWeight="700" fill="var(--ink)">
-                    {fmtAxisValue(hoverPt.v)}
+                  <text x={boxX + tw / 2} y={boxY + 14} textAnchor="middle" className="mono" fontSize="10" fontWeight="700" fill="var(--ink)">
+                    {header}
                   </text>
-                  <text x={boxX + tw / 2} y={boxY + 27} textAnchor="middle" className="mono" fontSize="9" fill="var(--ink-faint)">
-                    {hoverPt.x}
-                  </text>
+                  {hoverRows.map((r, i) => (
+                    <g key={i}>
+                      <circle cx={boxX + 10} cy={boxY + 14 * (i + 2) - 3} r="3" fill={r.s.color} />
+                      <text x={boxX + 18} y={boxY + 14 * (i + 2)} className="mono" fontSize="9.5" fill="var(--ink-soft)">
+                        {r.s.label}: {fmtAxisValue(r.pt.v)}
+                      </text>
+                    </g>
+                  ))}
                 </g>
               );
             })()}
           </g>
         )}
-      </svg>
-    </div>
-  );
-}
-
-/** Varias series sobre un eje X compartido (unión ordenada de sus fechas) — sin hover, a diferencia de LineChart. */
-export function MultiLineChart({
-  series,
-  height = 200,
-  yMin,
-  yMax,
-  area = false,
-}: {
-  series: MultiSeries[];
-  height?: number;
-  yMin?: number;
-  yMax?: number;
-  area?: boolean;
-}) {
-  const [ref, w] = useWidth();
-  const padL = 38,
-    padR = 14,
-    padT = 18,
-    padB = 26;
-  const categories = Array.from(new Set(series.flatMap((s) => s.data.map((d) => d.x)))).sort();
-  const vals = series.flatMap((s) => s.data.map((d) => d.v));
-  const [mn, mx] = paddedDomain(vals.length ? vals : [0, 1], yMin, yMax);
-  const range = mx - mn || 1;
-  const iw = Math.max(10, w - padL - padR),
-    ih = height - padT - padB;
-  const X = (i: number) => padL + (i / Math.max(1, categories.length - 1)) * iw;
-  const Y = (v: number) => padT + ih - ((v - mn) / range) * ih;
-  const xTickCount = Math.min(5, categories.length);
-  const xTicks = Array.from(
-    new Set(
-      Array.from({ length: xTickCount }, (_, k) =>
-        Math.round((k / Math.max(1, xTickCount - 1)) * (categories.length - 1))
-      )
-    )
-  );
-  const yTicks = [0, 0.25, 0.5, 0.75, 1];
-
-  return (
-    <div ref={ref} style={{ width: "100%" }}>
-      <svg width={w} height={height} style={{ display: "block", overflow: "visible" }}>
-        {yTicks.map((g, i) => (
-          <line
-            key={i}
-            x1={padL}
-            x2={w - padR}
-            y1={padT + ih * (1 - g)}
-            y2={padT + ih * (1 - g)}
-            stroke="var(--border)"
-            strokeWidth="1"
-            strokeDasharray="2 5"
-          />
-        ))}
-        {yTicks.map((g, i) => (
-          <text
-            key={i}
-            x={padL - 6}
-            y={padT + ih * (1 - g) + 3}
-            textAnchor="end"
-            className="mono"
-            fontSize="10"
-            fill="var(--ink-faint)"
-          >
-            {fmtAxisValue(mn + range * g)}
-          </text>
-        ))}
-        {series.map((s, si) => {
-          const pts = s.data
-            .map((d) => ({ i: categories.indexOf(d.x), v: d.v }))
-            .filter((p) => p.i >= 0)
-            .sort((a, b) => a.i - b.i);
-          if (pts.length < 2) return null;
-          const line = pts.map((p, i) => (i ? "L" : "M") + X(p.i).toFixed(1) + " " + Y(p.v).toFixed(1)).join(" ");
-          const areaP = area
-            ? line + ` L ${X(pts[pts.length - 1].i).toFixed(1)} ${padT + ih} L ${X(pts[0].i).toFixed(1)} ${padT + ih} Z`
-            : null;
-          return (
-            <g key={si}>
-              {areaP && <path d={areaP} fill={s.color} fillOpacity="0.1" />}
-              <path d={line} fill="none" stroke={s.color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" />
-            </g>
-          );
-        })}
-        {xTicks.map((ti, i) => (
-          <text
-            key={i}
-            x={X(ti)}
-            y={height - 7}
-            textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"}
-            className="mono"
-            fontSize="10.5"
-            fill="var(--ink-faint)"
-          >
-            {categories[ti]}
-          </text>
-        ))}
       </svg>
       <div style={{ display: "flex", gap: 14, marginTop: 4, flexWrap: "wrap" }}>
         {series.map((s, i) => (
@@ -305,26 +234,29 @@ export function ScatterChart({
   data,
   xKey = "cloro",
   yKey = "captura",
+  dateKey,
   height = 220,
   color = "var(--teal)",
   xLabel,
   yLabel,
 }: {
-  data: Record<string, number>[];
+  data: Record<string, number | string>[];
   xKey?: string;
   yKey?: string;
+  dateKey?: string;
   height?: number;
   color?: string;
   xLabel?: string;
   yLabel?: string;
 }) {
   const [ref, w] = useWidth();
+  const [hover, setHover] = useState<number | null>(null);
   const padL = 34,
     padR = 14,
     padT = 14,
     padB = 30;
-  const xs = data.map((d) => d[xKey]),
-    ys = data.map((d) => d[yKey]);
+  const xs = data.map((d) => Number(d[xKey])),
+    ys = data.map((d) => Number(d[yKey]));
   const xmn = Math.min(...xs),
     xmx = Math.max(...xs),
     ymn = Math.min(...ys),
@@ -336,13 +268,41 @@ export function ScatterChart({
   const n = data.length,
     sx = xs.reduce((a, b) => a + b, 0),
     sy = ys.reduce((a, b) => a + b, 0);
-  const sxy = data.reduce((a, d) => a + d[xKey] * d[yKey], 0),
+  const sxy = data.reduce((a, d, i) => a + xs[i] * ys[i], 0),
     sxx = xs.reduce((a, b) => a + b * b, 0);
   const slope = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1),
     intc = (sy - slope * sx) / n;
+
+  const HIT_RADIUS = 18;
+  function handleMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left,
+      py = e.clientY - rect.top;
+    let best = -1,
+      bestDist = HIT_RADIUS * HIT_RADIUS;
+    for (let i = 0; i < data.length; i++) {
+      const dx = X(xs[i]) - px,
+        dy = Y(ys[i]) - py;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = i;
+      }
+    }
+    setHover(best >= 0 ? best : null);
+  }
+
+  const hoverPt = hover != null ? data[hover] : null;
+
   return (
     <div ref={ref} style={{ width: "100%" }}>
-      <svg width={w} height={height} style={{ display: "block", overflow: "visible" }}>
+      <svg
+        width={w}
+        height={height}
+        style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
+        onMouseMove={handleMove}
+        onMouseLeave={() => setHover(null)}
+      >
         {[0, 0.5, 1].map((g, i) => (
           <line key={i} x1={padL} x2={w - padR} y1={padT + ih * g} y2={padT + ih * g} stroke="var(--border)" strokeDasharray="2 5" />
         ))}
@@ -356,7 +316,16 @@ export function ScatterChart({
           strokeDasharray="5 4"
         />
         {data.map((d, i) => (
-          <circle key={i} cx={X(d[xKey])} cy={Y(d[yKey])} r="4" fill={color} fillOpacity="0.5" stroke={color} strokeWidth="1" />
+          <circle
+            key={i}
+            cx={X(xs[i])}
+            cy={Y(ys[i])}
+            r={hover === i ? "5.5" : "4"}
+            fill={color}
+            fillOpacity={hover === i ? "0.85" : "0.5"}
+            stroke={color}
+            strokeWidth={hover === i ? "1.6" : "1"}
+          />
         ))}
         <text x={padL} y={height - 8} className="mono" fontSize="10.5" fill="var(--ink-faint)">
           {xLabel}
@@ -371,6 +340,42 @@ export function ScatterChart({
         >
           {yLabel}
         </text>
+        {hoverPt && hover != null && (
+          <g>
+            {(() => {
+              const rows = [
+                `${xLabel ?? xKey}: ${fmtAxisValue(Number(hoverPt[xKey]))}`,
+                `${yLabel ?? yKey}: ${fmtAxisValue(Number(hoverPt[yKey]))}`,
+              ];
+              const dateVal = dateKey ? hoverPt[dateKey] : undefined;
+              if (typeof dateVal === "string") rows.unshift(formatTooltipHeader(dateVal, "day"));
+              const maxChars = Math.max(...rows.map((r) => r.length));
+              const tw = Math.max(90, maxChars * 5.6 + 16);
+              const th = 8 + rows.length * 14 + 6;
+              const boxX = Math.min(Math.max(X(xs[hover]) - tw / 2, padL), w - padR - tw);
+              const boxY = Math.max(Y(ys[hover]) - th - 10, 2);
+              return (
+                <g>
+                  <rect x={boxX} y={boxY} width={tw} height={th} rx="6" fill="var(--surface)" stroke="var(--border)" />
+                  {rows.map((r, i) => (
+                    <text
+                      key={i}
+                      x={boxX + tw / 2}
+                      y={boxY + 14 * (i + 1)}
+                      textAnchor="middle"
+                      className="mono"
+                      fontSize={i === 0 && dateVal ? "9.5" : "10"}
+                      fontWeight={i === 0 && dateVal ? "400" : "700"}
+                      fill={i === 0 && dateVal ? "var(--ink-faint)" : "var(--ink)"}
+                    >
+                      {r}
+                    </text>
+                  ))}
+                </g>
+              );
+            })()}
+          </g>
+        )}
       </svg>
     </div>
   );
