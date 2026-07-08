@@ -287,8 +287,51 @@ def test_load_thread_alterna_roles_en_orden_cronologico():
     db.execute.return_value = result
 
     import asyncio
+    import uuid
 
-    hist = asyncio.run(dashboard._load_thread("user-x", db))
+    hist = asyncio.run(dashboard._load_thread("user-x", uuid.uuid4(), db))
     assert [h["role"] for h in hist] == ["user", "model", "user", "model"]
     assert hist[0]["parts"][0]["text"] == "q1"  # cronológico: q1 primero
     assert hist[-1]["parts"][0]["text"] == "a2"  # a2 al final
+
+
+def test_ai_history_agrupa_turnos_por_conversacion():
+    """Dos turnos del mismo hilo → una sola conversación con 2 turnos; el hilo con
+    actividad más reciente va primero y el título es la primera pregunta del hilo."""
+    import uuid
+    from datetime import datetime, timezone
+
+    from app.api.v1.routers import dashboard
+
+    conv_a = uuid.uuid4()
+    conv_b = uuid.uuid4()
+
+    def row(cid, q, secs):
+        r = MagicMock()
+        r.id = uuid.uuid4()
+        r.conversation_id = cid
+        r.pregunta = q
+        r.respuesta = [{"tipo": "texto", "html": "r"}]
+        r.sugerencia = None
+        r.created_at = datetime(2026, 7, 8, 12, 0, secs, tzinfo=timezone.utc)
+        return r
+
+    # Orden desc (más reciente primero), como lo devuelve la query.
+    scalars = MagicMock()
+    scalars.all.return_value = [
+        row(conv_b, "b1", 30),  # hilo B, más reciente
+        row(conv_a, "a2", 20),  # hilo A, turno 2
+        row(conv_a, "a1", 10),  # hilo A, turno 1 (título)
+    ]
+    result = MagicMock()
+    result.scalars.return_value = scalars
+    db = AsyncMock()
+    db.execute.return_value = result
+
+    import asyncio
+
+    out = asyncio.run(dashboard.ai_history(20, db, "user-x", None))
+    hist = out["historial"]
+    assert [c.id for c in hist] == [str(conv_b), str(conv_a)]  # B primero (más reciente)
+    assert hist[1].titulo == "a1"  # título = primera pregunta cronológica
+    assert [t.pregunta for t in hist[1].turnos] == ["a1", "a2"]  # cronológico dentro del hilo

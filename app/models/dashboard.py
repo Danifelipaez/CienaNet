@@ -24,6 +24,10 @@ class AIConversation(Base):
     # Identidad blanda del cliente (UUID de localStorage, enviado como X-User-Id).
     # Aísla hilo e historial por usuario. Índice compuesto (user_id, created_at) en la migración 007.
     user_id: Mapped[str] = mapped_column(String(64), server_default=text("'legacy'"))
+    # Clave de agrupación del hilo: todos los turnos de una misma conversación la
+    # comparten. La mintea el cliente al abrir un chat nuevo. Índice (user_id,
+    # conversation_id, created_at) en la migración 009.
+    conversation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     pregunta: Mapped[str] = mapped_column(Text)
     respuesta: Mapped[list] = mapped_column(JSONB)
     sugerencia: Mapped[str | None] = mapped_column(Text, nullable=True)

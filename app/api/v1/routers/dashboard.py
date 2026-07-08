@@ -4,8 +4,8 @@ GET  /dashboard/points         — puntos de pesca con condición/IPP actual
 GET  /dashboard/species        — catálogo de especies (estático, ver ponytail abajo)
 GET  /dashboard/sedimentation  — zonas de sedimentación (capa del mapa)
 POST /dashboard/ai/ask         — pregunta libre al AIProvider configurado
-GET  /dashboard/ai/history     — historial de preguntas/respuestas de la vista IA
-DELETE /dashboard/ai/history/{id} — borra una conversación del historial del usuario
+GET  /dashboard/ai/history     — historial agrupado en conversaciones (un hilo = tarjeta)
+DELETE /dashboard/ai/history/{conversation_id} — borra una conversación entera del usuario
 GET  /dashboard/system-status  — estado de APIs externas + métricas del bot
 """
 
@@ -20,7 +20,12 @@ from app.api.v1.dependencies import get_dashboard_user, require_admin
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.dashboard import AIConversation
-from app.schemas.dashboard import AIHistoryItem, AskRequest, AskResponse
+from app.schemas.dashboard import (
+    AIConversationItem,
+    AITurn,
+    AskRequest,
+    AskResponse,
+)
 from app.services.ai_service import get_ai_provider
 from app.services.dashboard_service import get_latest_snapshot
 from app.services.points_service import get_points
@@ -73,16 +78,22 @@ def _parrafos_to_text(parrafos: list | None, sugerencia: str | None) -> str:
     return "\n".join(parts) or "(respuesta previa)"
 
 
-async def _load_thread(user_id: str, db: AsyncSession) -> list[dict]:
-    """Últimos turnos del hilo del usuario como contexto para Gemini (orden cronológico).
+async def _load_thread(
+    user_id: str, conversation_id: uuid.UUID, db: AsyncSession
+) -> list[dict]:
+    """Últimos turnos de ESTA conversación como contexto para Gemini (cronológico).
 
     Cada fila aporta dos turnos: pregunta (user) + respuesta aplanada (model).
-    Acotado por settings.ai_history_turns para no inflar el costo de tokens.
+    Acotado por settings.ai_history_turns para no inflar el costo de tokens. La
+    memoria es por conversación: un hilo nuevo arranca sin arrastrar los anteriores.
     """
     rows = (
         await db.execute(
             select(AIConversation.pregunta, AIConversation.respuesta, AIConversation.sugerencia)
-            .where(AIConversation.user_id == user_id)
+            .where(
+                AIConversation.user_id == user_id,
+                AIConversation.conversation_id == conversation_id,
+            )
             .order_by(desc(AIConversation.created_at))
             .limit(settings.ai_history_turns)
         )
@@ -121,7 +132,11 @@ async def ask_ai(
             f"{json.dumps(body.contexto, ensure_ascii=False)}."
         )
 
-    history = await _load_thread(user_id, db)
+    # Hilo existente o conversación nueva: si el cliente no manda conversation_id,
+    # minteamos uno y lo devolvemos para que fije el turno actual al mismo hilo.
+    conversation_id = body.conversation_id or uuid.uuid4()
+
+    history = await _load_thread(user_id, conversation_id, db)
     result = await get_ai_provider().answer_structured(
         system=system, user=body.pregunta, history=history
     )
@@ -129,6 +144,7 @@ async def ask_ai(
     db.add(
         AIConversation(
             user_id=user_id,
+            conversation_id=conversation_id,
             pregunta=body.pregunta,
             respuesta=result["parrafos"],
             sugerencia=result.get("sugerencia"),
@@ -137,7 +153,11 @@ async def ask_ai(
     )
     await db.commit()
 
-    return AskResponse(parrafos=result["parrafos"], sugerencia=result.get("sugerencia"))
+    return AskResponse(
+        parrafos=result["parrafos"],
+        sugerencia=result.get("sugerencia"),
+        conversation_id=str(conversation_id),
+    )
 
 
 @router.get("/ai/history")
@@ -147,42 +167,65 @@ async def ai_history(
     user_id: str = Depends(get_dashboard_user),
     _: None = Depends(require_admin),
 ) -> dict:
-    """Historial de la vista 'Pregunta a la IA' DEL USUARIO actual (más reciente primero)."""
+    """Historial DEL USUARIO agrupado en conversaciones (un hilo = una tarjeta).
+
+    Los turnos se agrupan por conversation_id como hacen las plataformas de chat:
+    cada conversación es una tarjeta titulada por su primera pregunta, ordenadas
+    por actividad más reciente. `limit` acota el número de conversaciones.
+    """
+    # Traemos turnos recientes (cap holgado) y agrupamos en memoria. En orden desc
+    # el primer turno visto de cada hilo es el más reciente → hilos ordenados por
+    # actividad. Dentro de cada hilo revertimos a orden cronológico.
     rows = (
         await db.execute(
             select(AIConversation)
             .where(AIConversation.user_id == user_id)
             .order_by(desc(AIConversation.created_at))
-            .limit(limit)
+            .limit(max(limit, 1) * 30)
         )
     ).scalars().all()
-    return {
-        "historial": [
-            AIHistoryItem(
-                id=str(r.id),
-                pregunta=r.pregunta,
-                respuesta=r.respuesta,
-                sugerencia=r.sugerencia,
-                contexto=r.contexto,
-                created_at=r.created_at.isoformat(),
+
+    convos: dict[str, list[AIConversation]] = {}
+    for r in rows:
+        convos.setdefault(str(r.conversation_id), []).append(r)
+
+    historial: list[AIConversationItem] = []
+    for cid, turns in list(convos.items())[:limit]:
+        turns_asc = list(reversed(turns))  # cronológico
+        historial.append(
+            AIConversationItem(
+                id=cid,
+                titulo=turns_asc[0].pregunta,
+                created_at=turns_asc[0].created_at.isoformat(),
+                updated_at=turns_asc[-1].created_at.isoformat(),
+                turnos=[
+                    AITurn(
+                        id=str(t.id),
+                        pregunta=t.pregunta,
+                        respuesta=t.respuesta,
+                        sugerencia=t.sugerencia,
+                        created_at=t.created_at.isoformat(),
+                    )
+                    for t in turns_asc
+                ],
             )
-            for r in rows
-        ]
-    }
+        )
+    return {"historial": historial}
 
 
-@router.delete("/ai/history/{item_id}")
+@router.delete("/ai/history/{conversation_id}")
 async def delete_ai_history(
-    item_id: uuid.UUID,
+    conversation_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_dashboard_user),
     _: None = Depends(require_admin),
 ) -> dict:
-    """Borra una conversación del historial. Acotado al user_id: un usuario solo
-    puede borrar lo suyo, aunque adivine el id de otro."""
+    """Borra una conversación entera (todos sus turnos) del historial. Acotado al
+    user_id: un usuario solo puede borrar lo suyo, aunque adivine el id de otro."""
     await db.execute(
         delete(AIConversation).where(
-            AIConversation.id == item_id, AIConversation.user_id == user_id
+            AIConversation.conversation_id == conversation_id,
+            AIConversation.user_id == user_id,
         )
     )
     await db.commit()

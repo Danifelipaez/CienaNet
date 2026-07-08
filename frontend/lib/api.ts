@@ -150,15 +150,25 @@ export interface AIParrafo {
 export interface AskResponse {
   parrafos: AIParrafo[];
   sugerencia: string | null;
+  conversation_id: string; // hilo al que quedó asociada la respuesta
 }
 
-export interface AIHistoryItem {
+// Un turno (pregunta + respuesta) dentro de una conversación.
+export interface AITurn {
   id: string;
   pregunta: string;
   respuesta: AIParrafo[];
   sugerencia: string | null;
-  contexto: Record<string, unknown> | null;
   created_at: string;
+}
+
+// Una conversación del historial: un hilo con todos sus turnos (un hilo = una card).
+export interface AIConversationItem {
+  id: string; // conversation_id
+  titulo: string; // primera pregunta del hilo
+  created_at: string;
+  updated_at: string; // última actividad — ordena el historial
+  turnos: AITurn[];
 }
 
 // ── Sistema ────────────────────────────────────────────────────────────────────

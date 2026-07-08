@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { backendFetchAdmin, type AIHistoryItem } from "@/lib/api";
+import { backendFetchAdmin, type AIConversationItem } from "@/lib/api";
 
 export async function GET(request: Request) {
   const limit = new URL(request.url).searchParams.get("limit") ?? "20";
   const userId = request.headers.get("x-user-id") ?? "";
-  const data = await backendFetchAdmin<{ historial: AIHistoryItem[] }>(
+  const data = await backendFetchAdmin<{ historial: AIConversationItem[] }>(
     `/dashboard/ai/history?limit=${limit}`,
     { headers: { "X-User-Id": userId } }
   );
