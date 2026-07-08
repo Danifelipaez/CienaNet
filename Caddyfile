@@ -1,0 +1,14 @@
+# Reverse proxy + TLS automático (Let's Encrypt) para el servidor universitario.
+# Reemplazar <dominio> por el dominio real que asigne la universidad.
+# Requiere: registros DNS tipo A para ambos subdominios apuntando a la IP
+# pública del servidor, y los puertos 80 Y 443 abiertos entrantes (el 80 es
+# necesario para el challenge HTTP-01 de Let's Encrypt, no solo el 443 final).
+# Ver docs/DEPLOYMENT.md.
+
+api.<dominio> {
+	reverse_proxy backend:8000
+}
+
+dashboard.<dominio> {
+	reverse_proxy frontend:3000
+}

@@ -22,6 +22,10 @@
 
 **Alternativa si Vercel se queda corto:** Railway o Render (mejor soporte para procesos persistentes)
 
+**Actualización:** el servidor universitario es ahora el deployment principal
+de producción (recibe el webhook de Meta y corre el scheduler); Vercel pasó a
+ser respaldo/staging. Ver [DEPLOYMENT.md](./DEPLOYMENT.md).
+
 ### Base de Datos: Supabase (PostgreSQL)
 **Por qué Supabase:**
 - PostgreSQL completo (no NoSQL con limitaciones)
@@ -48,11 +52,12 @@ Dashboard científico, deploy Vercel separado del backend (`frontend/`, repo mis
 - **Route handlers propios** (`frontend/app/api/{admin,data}/*`) — proxean al backend FastAPI en vez de exponer `ADMIN_API_KEY` al navegador
 - No usa un SDK de gráficos externo pesado; charts en `components/charts/` sobre datos de `/data/history`
 
-### CI/CD: GitHub Actions + Vercel
+### CI/CD: GitHub Actions + Vercel + deploy manual (universidad)
 ```
-Push a main → Vercel auto-deploy (producción)
+Push a main → Vercel auto-deploy (respaldo/staging)
 Push a dev  → Vercel preview deploy (staging)
 PR abierto  → Tests en GitHub Actions → Preview deploy
+Servidor universitario → deploy manual (git pull + docker compose up -d --build), ver DEPLOYMENT.md
 ```
 
 ### IoT: Arduino + ESP32
@@ -121,6 +126,7 @@ AI_HISTORY_TURNS=10
 # App
 ENVIRONMENT=              # development | staging | production
 SENSOR_API_KEY_SECRET=    # Salt para hashear API keys de sensores
+RUN_SCHEDULER=            # true SOLO en el deployment dueño del scheduler (ver DEPLOYMENT.md)
 ```
 
 ## Lo que NO usamos y por qué

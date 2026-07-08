@@ -6,7 +6,7 @@ Este archivo es el punto de entrada para cualquier asistente de IA trabajando en
 Backend FastAPI para **CienRayas**, una app que entrega información ambiental de la Ciénaga Grande de Santa Marta a pescadores artesanales vía WhatsApp. Ver `/docs/CONTEXT.md` para contexto completo.
 
 ## Stack
-Python 3.11 + FastAPI + Supabase (PostgreSQL) + Meta WhatsApp Cloud API + Vercel. Ver `/docs/STACK.md`.
+Python 3.11 + FastAPI + Supabase (PostgreSQL) + Meta WhatsApp Cloud API. Desplegado en servidor universitario (principal) + Vercel (respaldo/staging). Ver `/docs/STACK.md` y `/docs/DEPLOYMENT.md`.
 
 ## Estructura del proyecto
 ```
@@ -39,3 +39,4 @@ Ver `/docs/VIBECODING.md` — incluye plantilla de prompts y flujo de trabajo.
 - `/docs/VIBECODING.md` — Mejores prácticas de desarrollo con IA
 - `/docs/WHATSAPP_API.md` — Integración Meta WhatsApp (webhook, envío, plantillas)
 - `/docs/IOT_SENSORES.md` — Red de sensores ESP32, protocolo, calibración
+- `/docs/DEPLOYMENT.md` — Despliegue (servidor universitario + Vercel), variables por deployment, runbook

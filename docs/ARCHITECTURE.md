@@ -11,7 +11,7 @@
                                                         ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        FASTAPI BACKEND                               │
-│                   (Vercel — Python Serverless)                       │
+│      (servidor universitario — principal · Vercel — respaldo)        │
 │                                                                      │
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────────────────┐  │
 │  │ /webhook  │ │ /sensors  │ │ /admin    │ │ /dashboard, /data  │  │
@@ -60,7 +60,7 @@
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                  DASHBOARD (Next.js — App Router)                    │
-│                   Deploy separado en Vercel                          │
+│         Deploy separado — servidor universitario + Vercel            │
 │                                                                      │
 │  frontend/app/dashboard/                                            │
 │    ├── mapa/       → mapa-view.tsx (Leaflet, fishing_points/IPP)     │
@@ -75,8 +75,10 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        CI/CD PIPELINE                                │
 │                                                                      │
-│  GitHub (main branch) ──► Vercel Auto Deploy ──► Production         │
-│  GitHub (dev branch)  ──► Vercel Preview ──► Staging                │
+│  GitHub (main branch) ──► Vercel Auto Deploy ──► Respaldo/staging   │
+│  GitHub (dev branch)  ──► Vercel Preview ──► Preview                │
+│  Servidor universitario ──► deploy manual (ver docs/DEPLOYMENT.md)  │
+│                             ──► Producción                           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -105,13 +107,27 @@
 6. Si hay alerta → se notifica a pescadores suscritos vía WhatsApp
 ```
 
-## Consideraciones de Despliegue en Vercel
+## Despliegues disponibles
 
-**Limitaciones a tener en cuenta:**
+Dos destinos, misma base de código y misma Supabase — ver
+[DEPLOYMENT.md](./DEPLOYMENT.md) para el cómo. `RUN_SCHEDULER` es la única
+variable que difiere entre ambos (controla quién corre el loop horario de
+refresco/alertas).
+
+**Servidor universitario (principal / producción):**
+- Proceso persistente (Docker o systemd+uvicorn) — sin límite de timeout por
+  función, soporta WebSockets si algún día hacen falta
+- Recibe el webhook real de Meta y las lecturas de los sensores ESP32
+- `RUN_SCHEDULER=true` — dueño del loop horario de refresco y alertas
+
+**Vercel (respaldo / staging):**
+- Serverless, `api/index.py` (handler Mangum) + `vercel.json`
 - Timeout máximo: 60s (plan Pro) / 10s (Hobby) — mantener handlers rápidos
 - No hay WebSockets en serverless functions
-- Variables de entorno: configuradas en Vercel Dashboard
 - Cada endpoint de FastAPI se mapea como función serverless separada
+- `RUN_SCHEDULER` ausente → default `false`: nunca corre el loop ni envía
+  alertas: solo su cron diario existente (`vercel.json`), que refresca el
+  snapshot sin enviar alertas
 
 **Estructura de archivos para Vercel:**
 ```
@@ -119,6 +135,14 @@ api/
   index.py          ← entry point FastAPI (handler Mangum)
 vercel.json         ← config de rutas
 requirements.txt    ← dependencias Python
+```
+
+**Estructura de archivos para el servidor universitario:**
+```
+Dockerfile            ← backend
+frontend/Dockerfile   ← dashboard
+docker-compose.yml    ← orquesta ambos + Caddy (TLS automático)
+Caddyfile             ← reverse proxy, api.<dominio> / dashboard.<dominio>
 ```
 
 ## Base de Datos — Esquema Principal
