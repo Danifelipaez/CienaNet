@@ -13,6 +13,7 @@ from app.models.environmental import (
     SatelliteData,
     WeatherSnapshot,
 )
+from app.core.config import settings
 from app.models.messaging import CatchReport
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
 from app.services.ingestion.ideam_hidro import get_nivel_historia, get_precipitacion_historia
@@ -52,19 +53,23 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         )
     ).scalar_one_or_none()
 
+    tasajera_task = get_weather_forecast(settings.tasajera_lat, settings.tasajera_lon)
+
     if db_satellite:
         satellite_data = {
             "sst_celsius": db_satellite.sst_celsius,
             "chlorophyll_mgm3": db_satellite.chlorophyll_mgm3,
             "date": db_satellite.date.isoformat(),
         }
-        weather_data, alerts = await asyncio.gather(
+        weather_data, tasajera_weather, alerts = await asyncio.gather(
             get_weather_forecast(),
+            tasajera_task,
             get_cyclone_alerts(),
         )
     else:
-        weather_data, satellite_data, alerts = await asyncio.gather(
+        weather_data, tasajera_weather, satellite_data, alerts = await asyncio.gather(
             get_weather_forecast(),
+            tasajera_task,
             get_satellite_data(),
             get_cyclone_alerts(),
         )
@@ -80,7 +85,8 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     ideam_precipitacion, ideam_nivel_rio = await ideam_task
 
     # Persistencia secuencial (una sola sesión async, no concurrent)
-    await _save_weather(db, weather_data)
+    await _save_weather(db, weather_data, "CGSM")
+    await _save_weather(db, tasajera_weather, "Tasajera")
     await _save_satellite(db, satellite_data, today)
     await _upsert_semaphore(db, today, semaphore, ipp)
     try:
@@ -167,7 +173,9 @@ async def get_history(db: AsyncSession, days: int) -> dict:
         "weather": [
             {
                 "timestamp": r.timestamp.isoformat(),
+                "estacion": r.estacion,
                 "temperature_c": r.temperature_c,
+                "humidity_pct": r.humidity_pct,
                 "wind_speed_kmh": r.wind_speed_kmh,
                 "precipitation_mm": r.precipitation_mm,
             }
@@ -200,22 +208,27 @@ async def get_history(db: AsyncSession, days: int) -> dict:
 # ── helpers privados ──────────────────────────────────────────────────────────
 
 
-async def _save_weather(db: AsyncSession, data: dict) -> None:
+async def _save_weather(db: AsyncSession, data: dict, estacion: str = "CGSM") -> None:
     if not any(v is not None for v in data.values()):
         return
-    # Dedup: no insertar si ya hay un snapshot en los últimos 60 min
+    # Dedup: no insertar si esta estación ya tiene un snapshot en los últimos 60 min
     cutoff = datetime.now(UTC) - timedelta(hours=1)
     recent = (
         await db.execute(
-            select(WeatherSnapshot).where(WeatherSnapshot.timestamp >= cutoff).limit(1)
+            select(WeatherSnapshot).where(
+                WeatherSnapshot.timestamp >= cutoff,
+                WeatherSnapshot.estacion == estacion,
+            ).limit(1)
         )
     ).scalar_one_or_none()
     if recent:
         return
     db.add(
         WeatherSnapshot(
+            estacion=estacion,
             timestamp=datetime.now(UTC),
             temperature_c=data.get("temperature_c"),
+            humidity_pct=data.get("humidity_pct"),
             wind_speed_kmh=data.get("wind_speed_kmh"),
             wind_direction_deg=data.get("wind_direction_deg"),
             precipitation_mm=data.get("precipitation_mm"),

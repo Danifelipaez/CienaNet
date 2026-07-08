@@ -31,11 +31,22 @@ class Settings(BaseSettings):
     sensor_api_key_secret: str
     admin_api_key: str = "change-me"
     environment: str = "development"
+    # true SOLO en el deployment dueño del webhook de WhatsApp y del scheduler
+    # (hoy: el servidor universitario). Controla si esta instancia agenda el
+    # loop horario (_hourly_refresh en app/main.py) — debe estar en true en un
+    # único deployment a la vez. Ver docs/DEPLOYMENT.md.
+    run_scheduler: bool = False
 
     # Coordenadas centro de la Ciénaga Grande (no secretos)
     # Centroide real medido (ver docs/KNOWLEDGE_BASE.md #12)
     cienaga_lat: float = 10.859056
     cienaga_lon: float = -74.460611
+
+    # Coordenadas Tasajera (dato comunitario ilustrativo, ver
+    # alembic/versions/003_fishing_points.py y docs/KNOWLEDGE_BASE.md #565 —
+    # no validado con medición territorial precisa)
+    tasajera_lat: float = 10.972
+    tasajera_lon: float = -74.434
 
     # ERDDAP — dataset ids versionados en config, no en código:
     # pueden cambiar si NOAA/Copernicus actualizan el producto satelital.

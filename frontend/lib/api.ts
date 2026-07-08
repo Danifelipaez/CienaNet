@@ -78,7 +78,9 @@ export const getSedimentation = () =>
 
 export interface WeatherHistoryPoint {
   timestamp: string;
+  estacion: string;
   temperature_c: number | null;
+  humidity_pct: number | null;
   wind_speed_kmh: number | null;
   precipitation_mm: number | null;
 }

@@ -7,9 +7,9 @@ import { MonoChip, Pill, StatusDot } from "@/components/ui/primitives";
 import { LineChart, ScatterChart, MultiLineChart, MoonGlyph } from "@/components/ui/charts";
 import type { HistoryResponse } from "@/lib/api";
 import {
-  weatherToVientoSeries,
-  weatherToVientoDiario,
-  weatherToVientoSemanal,
+  weatherToVientoMulti,
+  weatherToTempMulti,
+  weatherToHumedadMulti,
   satelliteToTempSeries,
   satelliteToChloroSeries,
   catchToSeries,
@@ -17,12 +17,13 @@ import {
   semaphoreToEventos,
   ideamPrecipitacionToSeries,
   ideamNivelToSeries,
+  type VistaClima,
 } from "./adapters";
 import { moonPhaseGlyph, moonPhaseLabel } from "@/lib/moon";
 
 const RANGOS = ["7", "30", "90"] as const;
-const VISTAS_VIENTO = ["hora", "dia", "7dias"] as const;
-const VISTA_VIENTO_LABEL: Record<(typeof VISTAS_VIENTO)[number], string> = {
+const VISTAS_CLIMA = ["hora", "dia", "7dias"] as const;
+const VISTA_CLIMA_LABEL: Record<VistaClima, string> = {
   hora: "Hora",
   dia: "Día",
   "7dias": "7 días",
@@ -53,7 +54,7 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
   const [history, setHistory] = useState(initialHistory);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState(false);
-  const [vientoVista, setVientoVista] = useState<(typeof VISTAS_VIENTO)[number]>("hora");
+  const [climaVista, setClimaVista] = useState<VistaClima>("hora");
 
   useEffect(() => {
     if (rango === "30" && history === initialHistory) return;
@@ -80,23 +81,25 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rango]);
 
-  const vientoSerie = useMemo(() => {
-    if (vientoVista === "dia") return weatherToVientoDiario(history.weather);
-    if (vientoVista === "7dias") return weatherToVientoSemanal(history.weather);
-    return weatherToVientoSeries(history.weather);
-  }, [history, vientoVista]);
+  const vientoSerie = useMemo(() => weatherToVientoMulti(history.weather, climaVista), [history, climaVista]);
+  const tempAmbSerie = useMemo(() => weatherToTempMulti(history.weather, climaVista), [history, climaVista]);
+  const humedadSerie = useMemo(() => weatherToHumedadMulti(history.weather, climaVista), [history, climaVista]);
   const tempSerie = useMemo(() => satelliteToTempSeries(history.satellite), [history]);
   const cloroSerie = useMemo(() => satelliteToChloroSeries(history.satellite), [history]);
   const capturaSerie = useMemo(() => catchToSeries(history.captura), [history]);
   const precipIdeamSerie = useMemo(() => ideamPrecipitacionToSeries(history.ideam_precipitacion), [history]);
   const nivelIdeamSerie = useMemo(() => ideamNivelToSeries(history.ideam_nivel_rio), [history]);
+  const vientoCGSMFlat = useMemo(
+    () => vientoSerie.find((s) => s.label === "CGSM")?.data ?? [],
+    [vientoSerie]
+  );
 
   function exportCSV() {
-    const n = Math.max(vientoSerie.length, tempSerie.length, cloroSerie.length, capturaSerie.length);
+    const n = Math.max(vientoCGSMFlat.length, tempSerie.length, cloroSerie.length, capturaSerie.length);
     const rows = [["fecha", "temp_c", "viento_kmh", "clorofila_mgm3", "captura_idx"]];
     for (let i = 0; i < n; i++) {
-      const fecha = tempSerie[i]?.x ?? vientoSerie[i]?.x ?? cloroSerie[i]?.x ?? capturaSerie[i]?.x ?? "";
-      rows.push([fecha, tempSerie[i]?.v ?? "", vientoSerie[i]?.v ?? "", cloroSerie[i]?.v ?? "", capturaSerie[i]?.v ?? ""].map(String));
+      const fecha = tempSerie[i]?.x ?? vientoCGSMFlat[i]?.x ?? cloroSerie[i]?.x ?? capturaSerie[i]?.x ?? "";
+      rows.push([fecha, tempSerie[i]?.v ?? "", vientoCGSMFlat[i]?.v ?? "", cloroSerie[i]?.v ?? "", capturaSerie[i]?.v ?? ""].map(String));
     }
     const csv = rows.map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -143,19 +146,19 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
       <CardGrid>
         <Card
           title="Velocidad del viento"
-          label="Open-Meteo"
+          label="Open-Meteo — Tasajera / CGSM"
           span={12}
           motif="cana"
           actions={
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <div className="cr-segment">
-                {VISTAS_VIENTO.map((v) => (
+                {VISTAS_CLIMA.map((v) => (
                   <button
                     key={v}
-                    className={"cr-seg-btn" + (vientoVista === v ? " active" : "")}
-                    onClick={() => setVientoVista(v)}
+                    className={"cr-seg-btn" + (climaVista === v ? " active" : "")}
+                    onClick={() => setClimaVista(v)}
                   >
-                    {VISTA_VIENTO_LABEL[v]}
+                    {VISTA_CLIMA_LABEL[v]}
                   </button>
                 ))}
               </div>
@@ -165,8 +168,43 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
             </div>
           }
         >
-          {vientoSerie.length > 1 ? (
-            <LineChart data={vientoSerie} height={200} color="var(--verde)" area yMin={0} />
+          {vientoSerie.some((s) => s.data.length > 1) ? (
+            <MultiLineChart series={vientoSerie} height={200} yMin={0} area />
+          ) : (
+            <EmptySeries />
+          )}
+        </Card>
+
+        <Card
+          title="Temperatura ambiental"
+          label="Open-Meteo — Tasajera / CGSM"
+          span={6}
+          motif="lirio"
+          actions={
+            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+              °C
+            </span>
+          }
+        >
+          {tempAmbSerie.some((s) => s.data.length > 1) ? (
+            <MultiLineChart series={tempAmbSerie} height={190} />
+          ) : (
+            <EmptySeries />
+          )}
+        </Card>
+        <Card
+          title="Humedad relativa"
+          label="Open-Meteo — Tasajera / CGSM"
+          span={6}
+          motif="mangle"
+          actions={
+            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+              %
+            </span>
+          }
+        >
+          {humedadSerie.some((s) => s.data.length > 1) ? (
+            <MultiLineChart series={humedadSerie} height={190} yMin={0} />
           ) : (
             <EmptySeries />
           )}
