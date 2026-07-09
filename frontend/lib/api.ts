@@ -8,19 +8,28 @@
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
 
-async function backendFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BACKEND_URL}/api/v1${path}`, { ...init, cache: "no-store" });
+// Los datos ambientales cambian a lo sumo cada hora (refresco horario del backend),
+// así que las lecturas de navegación se cachean unos segundos: la 1ª visita golpea
+// el backend y las siguientes se sirven del Data Cache → navegación instantánea.
+export const READ_REVALIDATE = 60;
+
+// revalidate=N cachea la respuesta N segundos (Data Cache de Next). Sin él, no-store:
+// cada llamada golpea el backend en vivo (correcto para lecturas por-usuario/mutaciones).
+async function backendFetch<T>(path: string, init?: RequestInit, revalidate?: number): Promise<T> {
+  const cacheOpt: RequestInit = revalidate != null ? { next: { revalidate } } : { cache: "no-store" };
+  const res = await fetch(`${BACKEND_URL}/api/v1${path}`, { ...init, ...cacheOpt });
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
 
-export async function backendFetchAdmin<T>(path: string, init?: RequestInit): Promise<T> {
+export async function backendFetchAdmin<T>(path: string, init?: RequestInit, revalidate?: number): Promise<T> {
   const adminKey = process.env.ADMIN_API_KEY;
   if (!adminKey) throw new Error("ADMIN_API_KEY no configurada en el servidor");
-  return backendFetch<T>(path, {
-    ...init,
-    headers: { ...init?.headers, "X-Admin-Key": adminKey },
-  });
+  return backendFetch<T>(
+    path,
+    { ...init, headers: { ...init?.headers, "X-Admin-Key": adminKey } },
+    revalidate
+  );
 }
 
 // ── Mapa ──────────────────────────────────────────────────────────────────────
@@ -57,19 +66,21 @@ export interface ZonaSedimentacion {
 }
 
 export const getPoints = () =>
-  backendFetch<{ puntos: PuntoPesca[] }>("/dashboard/points").then((r) => r.puntos);
+  backendFetch<{ puntos: PuntoPesca[] }>("/dashboard/points", undefined, READ_REVALIDATE).then((r) => r.puntos);
 
 export const getSpecies = () =>
-  backendFetch<{ especies: Especie[] }>("/dashboard/species").then((r) => r.especies);
+  backendFetch<{ especies: Especie[] }>("/dashboard/species", undefined, READ_REVALIDATE).then((r) => r.especies);
 
 export const getSedimentation = () =>
-  backendFetch<{ zonas: ZonaSedimentacion[] }>("/dashboard/sedimentation").then((r) => r.zonas);
+  backendFetch<{ zonas: ZonaSedimentacion[] }>("/dashboard/sedimentation", undefined, READ_REVALIDATE).then((r) => r.zonas);
 
 // ── Gráficas / históricos ──────────────────────────────────────────────────────
 
 export interface WeatherHistoryPoint {
   timestamp: string;
+  estacion: string;
   temperature_c: number | null;
+  humidity_pct: number | null;
   wind_speed_kmh: number | null;
   precipitation_mm: number | null;
 }
@@ -113,7 +124,8 @@ export interface HistoryResponse {
   ideam_nivel_rio: IdeamNivelPoint[];
 }
 
-export const getHistory = (days = 30) => backendFetch<HistoryResponse>(`/data/history?days=${days}`);
+export const getHistory = (days = 30) =>
+  backendFetch<HistoryResponse>(`/data/history?days=${days}`, undefined, READ_REVALIDATE);
 
 // ── Alertas ────────────────────────────────────────────────────────────────────
 

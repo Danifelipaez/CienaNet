@@ -2,7 +2,7 @@ import { Icon } from "@/components/ui/icon";
 import { Card, CardGrid } from "@/components/ui/card";
 import { MonoChip, Pill, StatusDot } from "@/components/ui/primitives";
 import { BackendError } from "@/components/ui/backend-error";
-import { backendFetchAdmin, type ApiStatus, type SystemStatusResponse } from "@/lib/api";
+import { backendFetchAdmin, READ_REVALIDATE, type ApiStatus, type SystemStatusResponse } from "@/lib/api";
 
 function estTone(e: ApiStatus["estado"]) {
   return e === "ok" ? "verde" : e === "degradado" ? "amarillo" : "rojo";
@@ -13,7 +13,7 @@ function estLabel(e: ApiStatus["estado"]) {
 
 async function getSystemStatus(): Promise<SystemStatusResponse | null> {
   try {
-    return await backendFetchAdmin<SystemStatusResponse>("/dashboard/system-status");
+    return await backendFetchAdmin<SystemStatusResponse>("/dashboard/system-status", undefined, READ_REVALIDATE);
   } catch {
     return null;
   }

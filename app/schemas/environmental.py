@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class WeatherData(BaseModel):
     temperature_c: float | None
+    humidity_pct: float | None = None
     wind_speed_kmh: float | None
     wind_direction_deg: float | None
     precipitation_mm: float | None
@@ -58,7 +59,9 @@ class DashboardSnapshot(BaseModel):
 
 class WeatherHistoryPoint(BaseModel):
     timestamp: str
+    estacion: str
     temperature_c: float | None
+    humidity_pct: float | None
     wind_speed_kmh: float | None
     precipitation_mm: float | None
 

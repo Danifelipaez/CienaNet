@@ -25,7 +25,7 @@ MOCK_SNAPSHOT = {
 }
 
 MOCK_HISTORY = {
-    "weather": [{"timestamp": "2026-06-29T10:00:00+00:00", "temperature_c": 28.0, "wind_speed_kmh": 12.0, "precipitation_mm": 0.0}],
+    "weather": [{"timestamp": "2026-06-29T10:00:00+00:00", "estacion": "CGSM", "temperature_c": 28.0, "humidity_pct": 78.0, "wind_speed_kmh": 12.0, "precipitation_mm": 0.0}],
     "captura": [{"date": "2026-06-29", "cantidad_indice": 55.0}],
     "semaphore": [{"date": "2026-06-29", "color": "green", "reason": "Condiciones favorables", "ipp_ranking": []}],
     "satellite": [{"date": "2026-06-27", "sst_celsius": 27.4, "chlorophyll_mgm3": 3.8}],

@@ -4,25 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/ui/icon";
 import { Card, CardGrid } from "@/components/ui/card";
 import { MonoChip, Pill, StatusDot } from "@/components/ui/primitives";
-import { LineChart, ScatterChart, MultiLineChart, MoonGlyph } from "@/components/ui/charts";
+import { TimeSeriesChart, ScatterChart, MoonGlyph } from "@/components/ui/charts";
 import type { HistoryResponse } from "@/lib/api";
 import {
-  weatherToVientoSeries,
-  weatherToVientoDiario,
-  weatherToVientoSemanal,
   satelliteToTempSeries,
   satelliteToChloroSeries,
   catchToSeries,
   toCorrelacion,
   semaphoreToEventos,
-  ideamPrecipitacionToSeries,
-  ideamNivelToSeries,
+  type VistaClima,
 } from "./adapters";
+import { CHART_SPECS, vistaToGranularity } from "./chart-specs";
 import { moonPhaseGlyph, moonPhaseLabel } from "@/lib/moon";
 
 const RANGOS = ["7", "30", "90"] as const;
-const VISTAS_VIENTO = ["hora", "dia", "7dias"] as const;
-const VISTA_VIENTO_LABEL: Record<(typeof VISTAS_VIENTO)[number], string> = {
+const VISTAS_CLIMA = ["hora", "dia", "7dias"] as const;
+const VISTA_CLIMA_LABEL: Record<VistaClima, string> = {
   hora: "Hora",
   dia: "Día",
   "7dias": "7 días",
@@ -53,7 +50,7 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
   const [history, setHistory] = useState(initialHistory);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState(false);
-  const [vientoVista, setVientoVista] = useState<(typeof VISTAS_VIENTO)[number]>("hora");
+  const [climaVista, setClimaVista] = useState<VistaClima>("hora");
 
   useEffect(() => {
     if (rango === "30" && history === initialHistory) return;
@@ -80,23 +77,34 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rango]);
 
-  const vientoSerie = useMemo(() => {
-    if (vientoVista === "dia") return weatherToVientoDiario(history.weather);
-    if (vientoVista === "7dias") return weatherToVientoSemanal(history.weather);
-    return weatherToVientoSeries(history.weather);
-  }, [history, vientoVista]);
+  // Cada spec produce sus series + granularidad de una vez — evita 7 useMemo casi idénticos.
+  const chartData = useMemo(
+    () =>
+      CHART_SPECS.map((spec) => {
+        const vista = spec.usesVista ? climaVista : "hora";
+        const series = spec.getSeries(history, vista);
+        const { granularity, aggregated } = spec.usesVista
+          ? vistaToGranularity(climaVista)
+          : { granularity: spec.granularity, aggregated: spec.aggregated ?? false };
+        return { spec, series, granularity, aggregated, annotations: spec.annotate?.(series) ?? [] };
+      }),
+    [history, climaVista]
+  );
+
   const tempSerie = useMemo(() => satelliteToTempSeries(history.satellite), [history]);
   const cloroSerie = useMemo(() => satelliteToChloroSeries(history.satellite), [history]);
   const capturaSerie = useMemo(() => catchToSeries(history.captura), [history]);
-  const precipIdeamSerie = useMemo(() => ideamPrecipitacionToSeries(history.ideam_precipitacion), [history]);
-  const nivelIdeamSerie = useMemo(() => ideamNivelToSeries(history.ideam_nivel_rio), [history]);
+  const vientoCGSMFlat = useMemo(
+    () => chartData.find((c) => c.spec.id === "viento")?.series.find((s) => s.label === "CGSM")?.data ?? [],
+    [chartData]
+  );
 
   function exportCSV() {
-    const n = Math.max(vientoSerie.length, tempSerie.length, cloroSerie.length, capturaSerie.length);
+    const n = Math.max(vientoCGSMFlat.length, tempSerie.length, cloroSerie.length, capturaSerie.length);
     const rows = [["fecha", "temp_c", "viento_kmh", "clorofila_mgm3", "captura_idx"]];
     for (let i = 0; i < n; i++) {
-      const fecha = tempSerie[i]?.x ?? vientoSerie[i]?.x ?? cloroSerie[i]?.x ?? capturaSerie[i]?.x ?? "";
-      rows.push([fecha, tempSerie[i]?.v ?? "", vientoSerie[i]?.v ?? "", cloroSerie[i]?.v ?? "", capturaSerie[i]?.v ?? ""].map(String));
+      const fecha = tempSerie[i]?.t ?? vientoCGSMFlat[i]?.t ?? cloroSerie[i]?.t ?? capturaSerie[i]?.t ?? "";
+      rows.push([fecha, tempSerie[i]?.v ?? "", vientoCGSMFlat[i]?.v ?? "", cloroSerie[i]?.v ?? "", capturaSerie[i]?.v ?? ""].map(String));
     }
     const csv = rows.map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -108,8 +116,6 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
   const correlacion = useMemo(() => toCorrelacion(history.satellite, history.captura), [history]);
   const eventos = useMemo(() => semaphoreToEventos(history.semaphore), [history]);
   const luna = useMemo(() => fasesLuna(Number(rango)), [rango]);
-
-  const cloroPeak = cloroSerie.length ? cloroSerie.reduce((mi, d, i, arr) => (d.v > arr[mi].v ? i : mi), 0) : 0;
 
   return (
     <div className="cr-content-scroll">
@@ -141,102 +147,50 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
       </header>
 
       <CardGrid>
-        <Card
-          title="Velocidad del viento"
-          label="Open-Meteo"
-          span={12}
-          motif="cana"
-          actions={
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="cr-segment">
-                {VISTAS_VIENTO.map((v) => (
-                  <button
-                    key={v}
-                    className={"cr-seg-btn" + (vientoVista === v ? " active" : "")}
-                    onClick={() => setVientoVista(v)}
-                  >
-                    {VISTA_VIENTO_LABEL[v]}
-                  </button>
-                ))}
+        {chartData.map(({ spec, series, granularity, aggregated, annotations }) => (
+          <Card
+            key={spec.id}
+            title={spec.title}
+            label={spec.source}
+            span={spec.span}
+            motif={spec.motif}
+            actions={
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {spec.showVistaToggle && (
+                  <div className="cr-segment">
+                    {VISTAS_CLIMA.map((v) => (
+                      <button
+                        key={v}
+                        className={"cr-seg-btn" + (climaVista === v ? " active" : "")}
+                        onClick={() => setClimaVista(v)}
+                      >
+                        {VISTA_CLIMA_LABEL[v]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                  {spec.unit}
+                </span>
               </div>
-              <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-                km/h
-              </span>
-            </div>
-          }
-        >
-          {vientoSerie.length > 1 ? (
-            <LineChart data={vientoSerie} height={200} color="var(--verde)" area yMin={0} />
-          ) : (
-            <EmptySeries />
-          )}
-        </Card>
-
-        <Card
-          title="Temp. superficial del agua"
-          label="NASA MODIS"
-          span={6}
-          motif="lirio"
-          actions={
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-              °C
-            </span>
-          }
-        >
-          {tempSerie.length > 1 ? <LineChart data={tempSerie} height={190} color="var(--teal)" area /> : <EmptySeries />}
-        </Card>
-        <Card
-          title="Clorofila-a"
-          label="Copernicus Marine"
-          span={6}
-          motif="mangle"
-          actions={
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-              mg/m³
-            </span>
-          }
-        >
-          {cloroSerie.length > 1 ? (
-            <LineChart data={cloroSerie} height={190} color="var(--verde-sem)" area yMin={0} annotations={[{ i: cloroPeak, label: "Pico" }]} />
-          ) : (
-            <EmptySeries />
-          )}
-        </Card>
-
-        <Card
-          title="Precipitación en la cuenca"
-          label="IDEAM — Media Luna / La Gran Vía"
-          span={6}
-          motif="raya"
-          actions={
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-              mm/día
-            </span>
-          }
-        >
-          {precipIdeamSerie.some((s) => s.data.length > 1) ? (
-            <MultiLineChart series={precipIdeamSerie} height={190} yMin={0} area />
-          ) : (
-            <EmptySeries />
-          )}
-        </Card>
-        <Card
-          title="Nivel de ríos tributarios"
-          label="IDEAM — Puerto Rico Hacienda / Ganadería Caribe"
-          span={6}
-          motif="mangle"
-          actions={
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-              metros
-            </span>
-          }
-        >
-          {nivelIdeamSerie.some((s) => s.data.length > 1) ? (
-            <MultiLineChart series={nivelIdeamSerie} height={190} yMin={0} />
-          ) : (
-            <EmptySeries />
-          )}
-        </Card>
+            }
+          >
+            {series.some((s) => s.data.length > 1) ? (
+              <TimeSeriesChart
+                series={series}
+                granularity={granularity}
+                aggregated={aggregated}
+                height={spec.span === 12 ? 200 : 190}
+                yMin={spec.yMin}
+                yMax={spec.yMax}
+                area={spec.area}
+                annotations={annotations}
+              />
+            ) : (
+              <EmptySeries />
+            )}
+          </Card>
+        ))}
 
         <Card label="Ciclo lunar — ventana de observación" span={12} pad={24}>
           <div className="cr-luna">
@@ -262,7 +216,15 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
 
         <Card title="Correlación" label="Clorofila-a vs. captura reportada" span={6} icon="gauge">
           {correlacion.length > 1 ? (
-            <ScatterChart data={correlacion} xKey="cloro" yKey="captura" height={210} xLabel="Clorofila mg/m³ →" yLabel="Captura (índice) →" />
+            <ScatterChart
+              data={correlacion}
+              xKey="cloro"
+              yKey="captura"
+              dateKey="date"
+              height={210}
+              xLabel="Clorofila mg/m³ →"
+              yLabel="Captura (índice) →"
+            />
           ) : (
             <EmptySeries note="Sin reportes de captura en esta ventana" />
           )}

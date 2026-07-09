@@ -27,7 +27,7 @@ from app.schemas.dashboard import (
     AskResponse,
 )
 from app.services.ai_service import get_ai_provider
-from app.services.dashboard_service import get_latest_snapshot
+from app.services.dashboard_service import build_ai_context, get_latest_snapshot
 from app.services.points_service import get_points
 from app.services.sedimentation_service import get_sedimentation_zones
 from app.services.system_status_service import get_system_status
@@ -122,9 +122,14 @@ async def ask_ai(
     system = (
         "Eres el asistente técnico-científico de CienRayas para el equipo de "
         "monitoreo de la Ciénaga Grande de Santa Marta. Contexto ambiental actual: "
-        f"{snapshot['semaphore']['reason']}, clorofila {snapshot['satellite'].get('chlorophyll_mgm3')} "
-        f"mg/m³, temperatura superficial {snapshot['satellite'].get('sst_celsius')} °C. "
-        "Responde en español, citando los datos disponibles."
+        f"{build_ai_context(snapshot)} "
+        "Responde en español, usando solo los datos de este contexto (no inventes "
+        "valores). Cuando cites un dato puntual (temperatura, humedad, viento, "
+        "precipitación, nivel de río, clorofila, etc.), agrégalo también como un "
+        "párrafo tipo 'datos' con un item por dato — 'v' el valor con su unidad, "
+        "'d' una descripción corta, y 'fuente' la estación/fuente exacta de este "
+        "contexto (ej. 'Open-Meteo — Tasajera', 'IDEAM — Media Luna'), así el "
+        "dashboard lo muestra como ficha, no como texto suelto."
     )
     if body.contexto:
         system += (

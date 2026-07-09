@@ -13,7 +13,8 @@
 Meta Developer Dashboard
   └── App → WhatsApp → Configuration
        ├── Phone Number: [número de la eSIM]
-       ├── Webhook URL: https://[tu-dominio].vercel.app/api/v1/webhook/whatsapp
+       ├── Webhook URL: https://api.[tu-dominio-universitario]/api/v1/webhook/whatsapp
+       │   (servidor universitario = deployment principal, ver docs/DEPLOYMENT.md)
        ├── Verify Token: [WHATSAPP_VERIFY_TOKEN del .env]
        └── Subscribed fields: messages, messaging_postbacks
 ```
@@ -198,7 +199,8 @@ Los costos varían por país. Colombia está en la categoría de tarifas de Lata
 ngrok http 8000
 
 # La URL de ngrok va temporalmente en Meta Developer Dashboard
-# Recuerda actualizarla con la URL de Vercel para producción
+# Recuerda volver a apuntarla al servidor universitario (deployment
+# principal) al terminar — ver docs/DEPLOYMENT.md
 ```
 
 ### Verificar entrega de mensajes
