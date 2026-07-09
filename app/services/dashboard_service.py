@@ -105,6 +105,9 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
             "safe": semaphore.safe,
         },
         "weather": weather_data,
+        "tasajera_weather": tasajera_weather,
+        "ideam_precipitacion": ideam_precipitacion,
+        "ideam_nivel_rio": ideam_nivel_rio,
         "satellite": satellite_data,
         "water": water,
         "sensors": [
@@ -120,6 +123,53 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         "cyclone_alerts": alerts,
         "updated_at": datetime.now(UTC).isoformat(),
     }
+
+
+def build_ai_context(snapshot: dict) -> str:
+    """Arma el bloque de contexto ambiental para el prompt de Gemini (dashboard.ask_ai).
+
+    Cubre las mismas fuentes que /data/latest — clima por estación (CGSM + Tasajera,
+    con humedad) e hidrometeorología IDEAM (lluvia/nivel de río) — resumidas a su
+    última lectura por estación para no inflar el prompt con series completas; el
+    histórico completo ya vive en /data/history si se necesita más adelante.
+    """
+    parts = [
+        f"Semáforo: {snapshot['semaphore']['reason']}.",
+        f"Clorofila-a: {snapshot['satellite'].get('chlorophyll_mgm3')} mg/m³ (Copernicus Marine). "
+        f"Temperatura superficial del agua: {snapshot['satellite'].get('sst_celsius')} °C (NASA MODIS).",
+    ]
+
+    def fmt_weather(label: str, w: dict) -> str:
+        return (
+            f"{label} (Open-Meteo): temperatura {w.get('temperature_c')} °C, "
+            f"humedad {w.get('humidity_pct')}%, viento {w.get('wind_speed_kmh')} km/h, "
+            f"precipitación {w.get('precipitation_mm')} mm."
+        )
+
+    parts.append(fmt_weather("CGSM", snapshot.get("weather") or {}))
+    tasajera = snapshot.get("tasajera_weather")
+    if tasajera:
+        parts.append(fmt_weather("Tasajera", tasajera))
+
+    def latest_por_estacion(rows: list[dict], value_key: str) -> dict[str, tuple[str, float]]:
+        latest: dict[str, tuple[str, float]] = {}
+        for r in rows:
+            prev = latest.get(r["estacion"])
+            if prev is None or r["date"] > prev[0]:
+                latest[r["estacion"]] = (r["date"], r[value_key])
+        return latest
+
+    precip = latest_por_estacion(snapshot.get("ideam_precipitacion") or [], "precipitacion_mm")
+    if precip:
+        detalle = "; ".join(f"{est} {v} mm ({fecha})" for est, (fecha, v) in precip.items())
+        parts.append(f"Precipitación IDEAM, última lectura por estación: {detalle}.")
+
+    nivel = latest_por_estacion(snapshot.get("ideam_nivel_rio") or [], "nivel_m")
+    if nivel:
+        detalle = "; ".join(f"{est} {v} m ({fecha})" for est, (fecha, v) in nivel.items())
+        parts.append(f"Nivel de río IDEAM, última lectura por estación: {detalle}.")
+
+    return " ".join(parts)
 
 
 async def get_history(db: AsyncSession, days: int) -> dict:
