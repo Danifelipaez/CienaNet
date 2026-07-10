@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/icon";
@@ -34,13 +34,17 @@ export function DashboardShell({
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const view = pathname.split("/")[2] || "mapa";
 
+  useEffect(() => setMobileOpen(false), [pathname]);
+
   return (
     <div className="cr-app">
-      <nav className={"cr-sidebar" + (collapsed ? " collapsed" : "")}>
+      {mobileOpen && <div className="cr-sidebar-overlay" onClick={() => setMobileOpen(false)} />}
+      <nav className={"cr-sidebar" + (collapsed ? " collapsed" : "") + (mobileOpen ? " mobile-open" : "")}>
         <div className="cr-sb-top">
           <SealLogo size={collapsed ? 40 : 42} />
           <div className="cr-sb-titlewrap">
@@ -76,6 +80,9 @@ export function DashboardShell({
       <div className="cr-main">
         <header className="cr-header">
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button className="cr-hamburger" onClick={() => setMobileOpen((o) => !o)} aria-label="Abrir menú">
+              <Icon name="menu" size={18} />
+            </button>
             <button className="cr-collapse" onClick={() => setCollapsed((c) => !c)} aria-label="Plegar menú">
               <Icon name="sliders" size={18} />
             </button>
