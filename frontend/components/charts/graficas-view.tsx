@@ -15,7 +15,7 @@ import {
   type VistaClima,
 } from "./adapters";
 import { CHART_SPECS, vistaToGranularity } from "./chart-specs";
-import { moonPhaseGlyph, moonPhaseLabel } from "@/lib/moon";
+import { moonPhaseGlyph, moonPhaseLabel, type MoonPhaseGlyph } from "@/lib/moon";
 
 const RANGOS = ["7", "30", "90"] as const;
 const VISTAS_CLIMA = ["hora", "dia", "7dias"] as const;
@@ -25,24 +25,15 @@ const VISTA_CLIMA_LABEL: Record<VistaClima, string> = {
   "7dias": "7 días",
 };
 
-/** Nodos en los puntos donde la fase realmente cambia (evita repetir la misma fase en nodos consecutivos). */
-function fasesLuna(days: number) {
-  const now = new Date();
-  const start = new Date(now);
-  start.setDate(start.getDate() - (days - 1));
-  const nodos: { i: number; glyph: ReturnType<typeof moonPhaseGlyph> }[] = [];
-  for (let i = 0; i < days; i++) {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
-    const glyph = moonPhaseGlyph(d);
-    if (!nodos.length || nodos[nodos.length - 1].glyph !== glyph) nodos.push({ i, glyph });
-  }
-  return nodos.map((n, idx) => ({
-    i: n.i,
-    glyph: n.glyph,
-    label: moonPhaseLabel(n.glyph),
-    activa: idx === nodos.length - 1,
-  }));
+const PHASE_ORDER: MoonPhaseGlyph[] = ["new", "first", "full", "last"];
+
+/** Secuencia fija de 5 fases (2 pasadas + actual + 2 futuras), siempre equiespaciadas y con la actual en el centro. */
+function fasesLuna() {
+  const idx = PHASE_ORDER.indexOf(moonPhaseGlyph(new Date()));
+  return [-2, -1, 0, 1, 2].map((offset) => {
+    const glyph = PHASE_ORDER[(idx + offset + PHASE_ORDER.length * 2) % PHASE_ORDER.length];
+    return { glyph, label: moonPhaseLabel(glyph), activa: offset === 0, futura: offset > 0 };
+  });
 }
 
 export function GraficasView({ initialHistory }: { initialHistory: HistoryResponse }) {
@@ -115,7 +106,7 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
   }
   const correlacion = useMemo(() => toCorrelacion(history.satellite, history.captura), [history]);
   const eventos = useMemo(() => semaphoreToEventos(history.semaphore), [history]);
-  const luna = useMemo(() => fasesLuna(Number(rango)), [rango]);
+  const luna = useMemo(() => fasesLuna(), []);
 
   return (
     <div className="cr-content-scroll">
@@ -196,19 +187,20 @@ export function GraficasView({ initialHistory }: { initialHistory: HistoryRespon
           <div className="cr-luna">
             <div className="cr-luna-track" />
             {luna.map((f, i) => (
-              <div key={i} className="cr-luna-node" style={{ left: `${(f.i / Math.max(1, Number(rango) - 1)) * 100}%` }}>
+              <div
+                key={i}
+                className="cr-luna-node"
+                style={{ left: `${(i / (luna.length - 1)) * 100}%`, opacity: f.futura ? 0.5 : 1 }}
+              >
                 <svg width="26" height="26" viewBox="0 0 22 22" style={{ background: "var(--surface)", borderRadius: "50%" }}>
                   <MoonGlyph phase={f.glyph} size={22} active={f.activa} />
                 </svg>
-                {/* con muchos nodos (ventanas largas) los textos chocan; solo el activo se rotula siempre */}
-                {(luna.length <= 6 || f.activa) && (
-                  <span
-                    className="mono"
-                    style={{ fontSize: 11, marginTop: 6, color: f.activa ? "var(--teal)" : "var(--ink-soft)", fontWeight: f.activa ? 700 : 400 }}
-                  >
-                    {f.label}
-                  </span>
-                )}
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, marginTop: 6, color: f.activa ? "var(--teal)" : "var(--ink-soft)", fontWeight: f.activa ? 700 : 400 }}
+                >
+                  {f.label}
+                </span>
               </div>
             ))}
           </div>

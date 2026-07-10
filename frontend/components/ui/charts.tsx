@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formatAxisTick, formatTooltipHeader, type ChartGranularity } from "@/components/charts/time-format";
 
 export type SeriesPoint = { t: string; v: number };
@@ -38,6 +38,14 @@ function paddedDomain(vals: number[], floor?: number, ceil?: number): [number, n
   return [lo, hi];
 }
 
+/** Categoría sintética "ahora", en el mismo formato que las categorías reales de esa granularidad
+ * (ver time-format.ts) — se agrega como tope del eje X para que la antigüedad del último dato real
+ * quede visible como un espacio entre el punto y el borde derecho. */
+function nowCategory(granularity: ChartGranularity): string {
+  const now = new Date();
+  return granularity === "hour" ? now.toISOString() : now.toISOString().slice(0, 10);
+}
+
 /**
  * Gráfica de series de tiempo — una o varias series sobre un eje X compartido. Reemplaza los antiguos
  * `LineChart`/`MultiLineChart`: toda gráfica de serie de tiempo pasa por aquí, así que hover, leyenda
@@ -70,7 +78,8 @@ export function TimeSeriesChart({
     padR = 14,
     padT = 18,
     padB = 26;
-  const categories = Array.from(new Set(series.flatMap((s) => s.data.map((d) => d.t)))).sort();
+  const now = useMemo(() => nowCategory(granularity), [granularity]);
+  const categories = Array.from(new Set([...series.flatMap((s) => s.data.map((d) => d.t)), now])).sort();
   const vals = series.flatMap((s) => s.data.map((d) => d.v));
   const [mn, mx] = paddedDomain(vals.length ? vals : [0, 1], yMin, yMax);
   const range = mx - mn || 1;
