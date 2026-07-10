@@ -84,17 +84,30 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
 
     ideam_precipitacion, ideam_nivel_rio = await ideam_task
 
-    # Persistencia secuencial (una sola sesión async, no concurrent)
-    await _save_weather(db, weather_data, "CGSM")
-    await _save_weather(db, tasajera_weather, "Tasajera")
-    await _save_satellite(db, satellite_data, today)
-    await _upsert_semaphore(db, today, semaphore, ipp)
+    # Persistencia secuencial (una sola sesión async, no concurrent). Cada guardado
+    # va envuelto: get_latest_snapshot() lo llama también message_router.py (bot de
+    # WhatsApp) y el cron de Vercel — un fallo de un guardado (p.ej. migración
+    # pendiente en esta DB) no debe romper la respuesta al pescador ni tumbar el
+    # resto de guardados de este mismo snapshot.
+    try:
+        await _save_weather(db, weather_data, "CGSM")
+        await _save_weather(db, tasajera_weather, "Tasajera")
+    except Exception as exc:
+        logger.warning("No se pudo guardar snapshot de clima en DB: %s", exc)
+        await db.rollback()
+    try:
+        await _save_satellite(db, satellite_data, today)
+    except Exception as exc:
+        logger.warning("No se pudo guardar dato satelital en DB: %s", exc)
+        await db.rollback()
+    try:
+        await _upsert_semaphore(db, today, semaphore, ipp)
+    except Exception as exc:
+        logger.warning("No se pudo guardar semáforo diario en DB: %s", exc)
+        await db.rollback()
     try:
         await _save_ideam_hidro(db, ideam_precipitacion, ideam_nivel_rio)
     except Exception as exc:
-        # No fatal: get_latest_snapshot() lo llama también message_router.py (bot
-        # de WhatsApp) — un fallo de respaldo (p.ej. migración 008 aún no aplicada
-        # en esta DB) no debe romper la respuesta al pescador ni el cron de Vercel.
         logger.warning("No se pudo guardar respaldo IDEAM en DB: %s", exc)
         await db.rollback()
 

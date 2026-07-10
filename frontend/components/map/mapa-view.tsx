@@ -7,6 +7,7 @@ import { Icon } from "@/components/ui/icon";
 import { StatusDot, SectionLabel, MonoChip, Toggle } from "@/components/ui/primitives";
 import { MoonGlyph } from "@/components/ui/charts";
 import type { PuntoPesca, Especie } from "@/lib/api";
+import type { EstacionSnapshot } from "@/lib/stations";
 
 const CR_CENTER: [number, number] = [10.86, -74.43];
 
@@ -19,7 +20,7 @@ function semLabel(c: string) {
 
 function markerIcon(L: typeof import("leaflet"), cond: string, selected: boolean) {
   const col = semColor(cond);
-  const s = selected ? 40 : 32;
+  const s = selected ? 24 : 18;
   return L.divIcon({
     className: "cr-marker",
     iconSize: [s, s * 1.3],
@@ -31,6 +32,34 @@ function markerIcon(L: typeof import("leaflet"), cond: string, selected: boolean
       ${selected ? `<circle cx="16" cy="14" r="2.4" fill="${col}"/>` : ""}
     </svg>`,
   });
+}
+
+function stationIcon(L: typeof import("leaflet")) {
+  return L.divIcon({
+    className: "cr-station-marker",
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+    html: `<svg width="14" height="14" viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="12" height="12" rx="3" fill="var(--teal, #2E7D6B)" stroke="#fff" stroke-width="1.6"/>
+    </svg>`,
+  });
+}
+
+function fmt(v: number | null, unit: string) {
+  return v == null ? "—" : `${v.toFixed(1)} ${unit}`;
+}
+
+function estacionPopupHTML(e: EstacionSnapshot) {
+  return `<div style="padding:12px 14px;font-family:var(--font-body)">
+    <div class="serif" style="font-size:16px;font-weight:600;color:var(--verde);margin-bottom:8px">${e.nombre}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12.5px;color:var(--ink-soft)">
+      <div>Temp. ambiental: <b style="color:var(--ink)">${fmt(e.tempAmbiental, "°C")}</b></div>
+      <div>Humedad: <b style="color:var(--ink)">${fmt(e.humedad, "%")}</b></div>
+      <div>Viento: <b style="color:var(--ink)">${fmt(e.viento, "km/h")}</b></div>
+      <div>Precipitación: <b style="color:var(--ink)">${fmt(e.precipitacion, "mm")}</b></div>
+      <div>Nivel río: <b style="color:var(--ink)">${fmt(e.nivelRio, "m")}</b></div>
+    </div>
+  </div>`;
 }
 
 function escapeHtml(s: string) {
@@ -59,10 +88,12 @@ export default function MapaView({
   puntos,
   especies,
   sedimentacion,
+  estaciones,
 }: {
   puntos: PuntoPesca[];
   especies: Especie[];
   sedimentacion: [number, number][][];
+  estaciones: EstacionSnapshot[];
 }) {
   const mapRef = useRef<LeafletType.Map | null>(null);
   const elRef = useRef<HTMLDivElement | null>(null);
@@ -76,7 +107,9 @@ export default function MapaView({
     semaforo: true,
     sst: false,
     clorofila: false,
+    viento: false,
     sedimentacion: false,
+    estaciones: false,
   });
   const [query, setQuery] = useState("");
   const [showSug, setShowSug] = useState(false);
@@ -106,7 +139,7 @@ export default function MapaView({
         maxZoom: 19,
       }).addTo(map);
 
-      ["sst", "clorofila", "sedimentacion", "semaforo", "puntos"].forEach((p, i) => {
+      ["sst", "clorofila", "viento", "sedimentacion", "semaforo", "puntos", "estaciones"].forEach((p, i) => {
         map.createPane("pane-" + p);
         const pane = map.getPane("pane-" + p)!;
         pane.style.transition = "opacity .3s ease";
@@ -118,13 +151,19 @@ export default function MapaView({
         const t = p.temp ?? 29;
         const k = Math.min(1, Math.max(0, (t - 29) / 5));
         const col = `rgb(${Math.round(180 + k * 70)}, ${Math.round(190 - k * 120)}, ${Math.round(120 - k * 70)})`;
-        L.circle([p.lat, p.lng], { radius: 3400, color: col, weight: 0, fillColor: col, fillOpacity: 0.32, pane: "pane-sst" }).addTo(sstG);
+        L.circle([p.lat, p.lng], { radius: 2400, color: col, weight: 0, fillColor: col, fillOpacity: 0.32, pane: "pane-sst" }).addTo(sstG);
       });
       const chlG = L.layerGroup();
       puntos.forEach((p) => {
         const k = Math.min(1, (p.clorofila ?? 0) / 9);
         const col = `rgb(${Math.round(120 - k * 60)}, ${Math.round(160 - k * 30)}, ${Math.round(90 - k * 30)})`;
-        L.circle([p.lat, p.lng], { radius: 2600 + k * 1500, color: col, weight: 0, fillColor: col, fillOpacity: 0.3, pane: "pane-clorofila" }).addTo(chlG);
+        L.circle([p.lat, p.lng], { radius: 1800 + k * 1000, color: col, weight: 0, fillColor: col, fillOpacity: 0.3, pane: "pane-clorofila" }).addTo(chlG);
+      });
+      const vieG = L.layerGroup();
+      puntos.forEach((p) => {
+        const k = Math.min(1, (p.viento ?? 0) / 25);
+        const col = `rgb(${Math.round(140 - k * 40)}, ${Math.round(170 - k * 20)}, ${Math.round(180 + k * 50)})`;
+        L.circle([p.lat, p.lng], { radius: 1600 + k * 1200, color: col, weight: 0, fillColor: col, fillOpacity: 0.28, pane: "pane-viento" }).addTo(vieG);
       });
       const sedG = L.layerGroup();
       sedimentacion.forEach((poly) => {
@@ -133,7 +172,7 @@ export default function MapaView({
       const semG = L.layerGroup();
       puntos.forEach((p) => {
         L.circleMarker([p.lat, p.lng], {
-          radius: 16,
+          radius: 10,
           color: semColor(p.condicion),
           weight: 2,
           fillOpacity: 0.1,
@@ -144,17 +183,25 @@ export default function MapaView({
       const ptsG = L.layerGroup();
       puntos.forEach((p) => {
         const m = L.marker([p.lat, p.lng], { icon: markerIcon(L, p.condicion, false), pane: "pane-puntos" });
-        m.bindPopup(popupHTML(p), { className: "cr-popup", closeButton: true, offset: [0, -30] });
+        m.bindPopup(popupHTML(p), { className: "cr-popup", closeButton: true, offset: [0, -20] });
         m.on("click", () => setSelected(p));
         m.addTo(ptsG);
         markerRef.current[p.id] = m;
       });
+      const estG = L.layerGroup();
+      estaciones.forEach((e) => {
+        const m = L.marker([e.lat, e.lng], { icon: stationIcon(L), pane: "pane-estaciones" });
+        m.bindPopup(estacionPopupHTML(e), { className: "cr-popup", closeButton: true, offset: [0, -10] });
+        m.addTo(estG);
+      });
 
       sstG.addTo(map);
       chlG.addTo(map);
+      vieG.addTo(map);
       sedG.addTo(map);
       semG.addTo(map);
       ptsG.addTo(map);
+      estG.addTo(map);
 
       map.on("move", () => {
         const c = map.getCenter();
@@ -215,9 +262,11 @@ export default function MapaView({
   const capas = [
     { id: "sst", icon: "thermometer", nombre: "Temp. superficial", sub: "NASA MODIS", tone: "rojo" },
     { id: "clorofila", icon: "leaf", nombre: "Clorofila-a", sub: "Copernicus Marine", tone: "teal" },
+    { id: "viento", icon: "wind", nombre: "Viento", sub: "Reporte comunitario", tone: "teal" },
     { id: "puntos", icon: "pin", nombre: "Puntos de pesca", sub: `${puntos.length} puntos · comunidad`, tone: "verde" },
     { id: "sedimentacion", icon: "waves", nombre: "Sedimentación", sub: "Zonas críticas", tone: "sediment" },
     { id: "semaforo", icon: "dot", nombre: "Semáforo", sub: "Condición por zona", tone: "amarillo" },
+    { id: "estaciones", icon: "gauge", nombre: "Estaciones", sub: "Viento · humedad · lluvia · nivel río", tone: "teal" },
   ] as const;
 
   return (

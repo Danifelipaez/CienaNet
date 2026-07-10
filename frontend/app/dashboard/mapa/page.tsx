@@ -1,12 +1,19 @@
 import { MapaViewLoader } from "@/components/map/mapa-view-loader";
 import { BackendError } from "@/components/ui/backend-error";
-import { getPoints, getSpecies, getSedimentation } from "@/lib/api";
+import { getPoints, getSpecies, getSedimentation, getHistory } from "@/lib/api";
+import { historyToEstaciones } from "@/lib/stations";
 
 export default async function MapaPage() {
   try {
-    const [puntos, especies, zonas] = await Promise.all([getPoints(), getSpecies(), getSedimentation()]);
+    const [puntos, especies, zonas, history] = await Promise.all([
+      getPoints(),
+      getSpecies(),
+      getSedimentation(),
+      getHistory(1),
+    ]);
     const sedimentacion = zonas.map((z) => z.polygon);
-    return <MapaViewLoader puntos={puntos} especies={especies} sedimentacion={sedimentacion} />;
+    const estaciones = historyToEstaciones(history);
+    return <MapaViewLoader puntos={puntos} especies={especies} sedimentacion={sedimentacion} estaciones={estaciones} />;
   } catch {
     return <BackendError title="Mapa interactivo" />;
   }
