@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.models.messaging import CatchReport, Conversation, User
 from app.services import whatsapp_service
 from app.services.ai_service import get_ai_provider
-from app.services.dashboard_service import get_latest_snapshot
+from app.services.dashboard_service import camaron_moonrise_hint, get_latest_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,15 @@ def _detect_especie(text_lower: str) -> str | None:
     return None
 
 
+_PREGUNTA_MARKERS = ("?", "dónde", "donde", "cuándo", "cuando", "estará", "estarán", "estaran", "hay camar")
+
+
+def _es_pregunta(text_lower: str) -> bool:
+    """Distingue una pregunta ('¿dónde hay camarón?') de un reporte de captura
+    ('hoy pesqué camarón') — ambos matchean _detect_especie por igual."""
+    return any(m in text_lower for m in _PREGUNTA_MARKERS)
+
+
 async def handle_incoming_text(
     wa_id: str, nombre: str | None, text: str, wa_message_id: str, db: AsyncSession
 ) -> None:
@@ -111,18 +120,21 @@ async def handle_incoming_text(
         user.alertas_activas = True
         await db.commit()
         reply = "Listo, quedaste suscrito a alertas. Escribe *alertas no* para darte de baja."
-    elif (especie := _detect_especie(text_lower)) is not None:
+    elif (especie := _detect_especie(text_lower)) is not None and not _es_pregunta(text_lower):
         db.add(CatchReport(user_id=user.id, especie=especie, timestamp=datetime.now(UTC)))
         await db.commit()
         reply = f"Gracias por reportar tu pesca de {especie} 🎣. Esto ayuda a toda la comunidad."
     else:
         # ponytail: llamada a Gemini inline (Vercel serverless no tiene background
         # tasks confiables). Mover a cola solo si la latencia molesta.
+        system = (
+            "Eres el asistente de CienRayas para pescadores artesanales de la "
+            "Ciénaga Grande de Santa Marta. Responde breve y claro, en español."
+        )
+        if "camar" in text_lower:
+            system += f"\n{camaron_moonrise_hint()}"
         ai_reply = await get_ai_provider().reply_text(
-            system=(
-                "Eres el asistente de CienRayas para pescadores artesanales de la "
-                "Ciénaga Grande de Santa Marta. Responde breve y claro, en español."
-            ),
+            system=system,
             user=text,
             history=await _recent_history(user.id, db),
         )

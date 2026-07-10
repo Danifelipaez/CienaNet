@@ -27,7 +27,7 @@ from app.schemas.dashboard import (
     AskResponse,
 )
 from app.services.ai_service import get_ai_provider
-from app.services.dashboard_service import build_ai_context, get_latest_snapshot
+from app.services.dashboard_service import build_ai_context, camaron_moonrise_hint, get_latest_snapshot
 from app.services.points_service import get_points
 from app.services.sedimentation_service import get_sedimentation_zones
 from app.services.system_status_service import get_system_status
@@ -136,6 +136,8 @@ async def ask_ai(
             "\nEl usuario tiene seleccionado este contexto en el mapa: "
             f"{json.dumps(body.contexto, ensure_ascii=False)}."
         )
+    if "camar" in body.pregunta.lower():
+        system += f"\n{camaron_moonrise_hint()}"
 
     # Hilo existente o conversación nueva: si el cliente no manda conversation_id,
     # minteamos uno y lo devolvemos para que fije el turno actual al mismo hilo.

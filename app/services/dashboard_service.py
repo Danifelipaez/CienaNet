@@ -185,6 +185,45 @@ def build_ai_context(snapshot: dict) -> str:
     return " ".join(parts)
 
 
+_SYNODIC_MONTH_DAYS = 29.530588853
+_KNOWN_NEW_MOON = datetime(2000, 1, 6, 18, 14, tzinfo=UTC)
+
+
+def _moonrise_hour_aprox(now: datetime) -> float:
+    """Hora local aproximada (0-23.99) de salida de la luna.
+
+    ponytail: aproximación sin librería de astronomía (mismo criterio que
+    frontend/lib/moon.ts) — ancla la luna nueva a la salida del sol (~06:00,
+    razonable para la latitud tropical de la Ciénaga) y avanza la salida ~50
+    min/día a lo largo del mes sinódico hasta completar el ciclo de 24h. Subir
+    a un cálculo efemérides real (p.ej. skyfield) si la precisión no alcanza.
+    """
+    age_days = (now - _KNOWN_NEW_MOON).total_seconds() / 86400 % _SYNODIC_MONTH_DAYS
+    return (6 + 24 * (age_days / _SYNODIC_MONTH_DAYS)) % 24
+
+
+def camaron_moonrise_hint(now: datetime | None = None) -> str:
+    """Creencia tradicional de los pescadores sobre la zona probable de camarón
+    según la hora de salida de la luna — NO es un dato medido, se debe presentar
+    como conocimiento comunitario (ver docs/GUARDRAILS.md)."""
+    hour = _moonrise_hour_aprox(now or datetime.now(UTC))
+    if 23 <= hour or hour < 1:
+        zona = "la zona media de la costa, como Tasajera"
+    elif 1 <= hour < 6:
+        zona = "la parte sur de esa costa"
+    else:
+        zona = "la parte norte de la costa que colinda con el mar"
+    hora_str = f"{int(hour):02d}:{int((hour % 1) * 60):02d}"
+    return (
+        "Conocimiento tradicional de los pescadores (no es un dato medido): dividen "
+        "la noche en tres partes según la hora en que sale la luna — si sale temprano "
+        "en la noche, el camarón está en la parte norte de la costa que colinda con el "
+        "mar; si sale entre 11pm y 1am, está a la mitad, como en Tasajera; si sale "
+        f"después de la 1am, está en la parte sur. Hoy la luna sale aprox. a las "
+        f"{hora_str}, por lo que según esta creencia el camarón estaría hacia {zona}."
+    )
+
+
 async def get_history(db: AsyncSession, days: int) -> dict:
     """Retorna series de tiempo de los últimos N días desde la DB."""
     # Se lanza ya para que corra en paralelo con las queries de DB de abajo (I/O

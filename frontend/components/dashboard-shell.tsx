@@ -26,6 +26,18 @@ function apiTone(estado: ApiStatus["estado"]) {
   return estado === "ok" ? "verde" : estado === "degradado" ? "amarillo" : "rojo";
 }
 
+function toggleTheme() {
+  const root = document.documentElement;
+  const isDark = root.getAttribute("data-palette") === "nocturno";
+  if (isDark) {
+    root.removeAttribute("data-palette");
+    localStorage.removeItem("cr-palette");
+  } else {
+    root.setAttribute("data-palette", "nocturno");
+    localStorage.setItem("cr-palette", "nocturno");
+  }
+}
+
 export function DashboardShell({
   apis,
   children,
@@ -66,6 +78,10 @@ export function DashboardShell({
         </div>
         <div className="cr-sb-bottom">
           <Botanical kind="raya" w={150} h={150} opacity={0.05} className="cr-sb-watermark" style={{ position: "absolute", right: -10, bottom: 36 }} />
+          <button className="cr-nav-item cr-theme-toggle" onClick={toggleTheme}>
+            <Icon name="moon" size={19} />
+            <span className="cr-label">Modo noche</span>
+          </button>
           <button className="cr-nav-item">
             <Icon name="settings" size={19} />
             <span className="cr-label">Ajustes</span>

@@ -35,8 +35,16 @@ export default function RootLayout({
     <html
       lang="es"
       className={`${inter.variable} ${jetbrainsMono.variable} ${playfairDisplay.variable}`}
+      suppressHydrationWarning
     >
-      <body>{children}</body>
+      <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var p=localStorage.getItem("cr-palette");if(p)document.documentElement.setAttribute("data-palette",p);}catch(e){}`,
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
