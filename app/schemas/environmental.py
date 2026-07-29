@@ -111,10 +111,18 @@ class CatchHistoryPoint(BaseModel):
     cantidad_indice: float
 
 
+class WaterHistoryPoint(BaseModel):
+    timestamp: str
+    ph: float | None
+    temperature_c: float | None
+    conductivity_mscm: float | None
+
+
 class HistoryResponse(BaseModel):
     weather: list[WeatherHistoryPoint]
     semaphore: list[SemaphoreHistoryPoint]
     satellite: list[SatelliteHistoryPoint]
     captura: list[CatchHistoryPoint]
+    water: list[WaterHistoryPoint] = []
     ideam_precipitacion: list[IdeamPrecipitacionPoint] = []
     ideam_nivel_rio: list[IdeamNivelPoint] = []
