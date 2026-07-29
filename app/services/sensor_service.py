@@ -7,16 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.environmental import Sensor, SensorReading
-from app.schemas.sensor import SensorReadingIn
+from app.schemas.sensor import MAX_READING_AGE_HOURS, SensorReadingIn
 from app.services.derived import salinity_psu, tds_mgl
 
-_MAX_AGE_HOURS = 6  # ponytail: una lectura de hace más de 6h no describe el agua de
-                    # ahora. Subir a un umbral por sensor si la red crece a nodos con
-                    # cadencias distintas.
+
+class SensorIdentityMismatchError(ValueError):
+    """reading.sensor_id (payload) no coincide con sensor.device_id (identidad
+    autenticada vía X-Api-Key). Sin este chequeo, la key de un sensor puede
+    escribir lecturas bajo el sensor_id de OTRO sensor."""
 
 
 async def process_reading(reading: SensorReadingIn, sensor: Sensor, db: AsyncSession) -> None:
     """Valida y persiste una lectura de sensor. Actualiza last_seen del sensor."""
+    if reading.sensor_id != sensor.device_id:
+        raise SensorIdentityMismatchError(
+            f"sensor_id del payload ('{reading.sensor_id}') no coincide con el "
+            f"dispositivo autenticado ('{sensor.device_id}')"
+        )
     db.add(
         SensorReading(
             sensor_id=sensor.id,
@@ -32,7 +39,7 @@ async def process_reading(reading: SensorReadingIn, sensor: Sensor, db: AsyncSes
 
 
 async def get_latest_readings(
-    db: AsyncSession, max_age_hours: int = _MAX_AGE_HOURS
+    db: AsyncSession, max_age_hours: int = MAX_READING_AGE_HOURS
 ) -> list[SensorReading]:
     """Retorna la lectura más reciente de cada sensor activo, si es reciente
     (dentro de `max_age_hours`). Antes no filtraba por `Sensor.active` ni por
