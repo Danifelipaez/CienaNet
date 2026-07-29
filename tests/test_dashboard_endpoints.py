@@ -147,7 +147,7 @@ def test_alerts_tiene_claves(client):
         mock_alerts.return_value = []
         data = client.get("/api/v1/data/alerts").json()
     assert "cyclones" in data
-    assert "external" in data
+    assert "semaphore_color" in data
 
 
 # ── /dashboard/sedimentation ─────────────────────────────────────────────────
