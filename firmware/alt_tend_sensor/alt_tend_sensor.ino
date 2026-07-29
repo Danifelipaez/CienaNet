@@ -146,6 +146,8 @@ void leerSensores() {
 }
 
 // ===== WIFI / NTP =====
+// WiFi STA generico: router u hotspot son el mismo modo, solo cambia el
+// SSID/password en config.h (ver comentario ahi). Sin rama de codigo.
 bool conectarWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);

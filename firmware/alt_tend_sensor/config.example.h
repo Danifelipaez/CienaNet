@@ -3,6 +3,20 @@
 // Copiar este archivo a config.h y llenar con valores reales.
 // config.h NO se commitea (ver .gitignore) -- contiene la API key del sensor.
 
+// WIFI_SSID / WIFI_PASSWORD: credenciales de CUALQUIER red WiFi 2.4GHz que dé
+// acceso a internet -- el firmware es agnostico al origen. Dos escenarios
+// posibles, mismo codigo, mismo #define, sin rama distinta (ver
+// conectarWiFi() en el .ino):
+//   - Router domestico/institucional (ej. WiFi del pueblo palafito o de la
+//     universidad).
+//   - Hotspot compartido desde celular/PC (ej. el celular del pescador).
+// Se descarto un modo "bridge por PC/USB" (relay serial) como via de
+// produccion: exige un PC permanentemente encendido junto a la boya (rompe
+// el diseño de boya autonoma a bateria con deep sleep) y obliga a que ese PC
+// termine/reorigine la conexion TLS, viendo la API key y el payload en texto
+// plano en esa etapa -- cosa que hoy NO pasa, porque el ESP32 habla TLS
+// end-to-end directo contra el backend. Ver docs/IOT_SENSORES.md, seccion
+// "Metodologias de Conectividad Evaluadas".
 #define WIFI_SSID "TU_RED_WIFI"
 #define WIFI_PASSWORD "TU_PASSWORD_WIFI"
 
