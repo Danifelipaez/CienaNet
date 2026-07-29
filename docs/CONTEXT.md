@@ -29,8 +29,12 @@ Sensores de bajo costo basados en **Arduino + ESP32** desplegados en la Ciénaga
 - **Conductividad eléctrica** (proxy de salinidad)
 - **Temperatura** del agua
 
-### 3. Datos Satelitales (fase futura)
-NASA MODIS, Copernicus Marine, Open-Meteo para contexto ambiental ampliado.
+### 3. Datos Satelitales (implementado)
+NASA MUR (temperatura superficial), Sentinel-3 OLCI vía NOAA CoastWatch
+(clorofila-a, migrado desde NASA MODIS), Open-Meteo (clima) y NOAA NHC
+(ciclones) para contexto ambiental ampliado — con desglose por zona de pesca,
+no solo un promedio para toda la Ciénaga. Copernicus Marine queda como fuente
+opcional/no activa (ver `docs/RESOLUCION_FUENTES.md`).
 
 ## Equipo
 | Persona | Rol | Área |

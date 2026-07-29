@@ -49,6 +49,50 @@ librerías). Además, `erddapy` no reenvía `requests_kwargs` (headers) dentro d
 `headers={"User-Agent": "CienaNetBot/1.0"}`. La SST (`coastwatch.pfeg.noaa.gov`, servidor
 distinto) no tiene este bloqueo y sigue usando `erddapy` sin cambios.
 
+## Actualización 2026-07: bounding box ajustado + desglose por zona
+
+**Estado:** implementado (migración 012).
+
+El bounding box original (`LAT_MIN/MAX = 10.5/11.2`, `LON_MIN/MAX = -74.85/-73.9`)
+"cubría" los 3 vértices medidos en campo (`docs/KNOWLEDGE_BASE.md` §12) con
+tanto margen que el promedio mezclaba mar Caribe abierto al norte y tierra al
+este con el agua de la laguna. Se ajustó a `10.54/11.01`, `-74.69/-74.32` —
+los mismos vértices, sin el margen sobrante. **Corte de continuidad:** los
+valores de `satellite_data` guardados antes de este cambio promedian un área
+mayor y no son directamente comparables con los de después (misma aceptación
+que la recalibración del IPP, ver `app/services/ipp.py`).
+
+**Desglose por zona:** la respuesta griddap de ERDDAP ya trae `latitude`/
+`longitude` por fila — antes se promediaba todo el box en dos escalares y se
+tiraba esa información espacial. Ahora `app/services/ingestion/satellite.py`
+también calcula la media de SST/clorofila dentro de un radio de ~5 km
+alrededor del centroide de cada una de las 6 zonas del IPP (`app/services/ipp.py::ZONES`,
+que ahora trae `lat`/`lng` — 3 medidas en campo, 3 estimadas pendientes de
+validar vía DG-05). Se persiste en `satellite_data.por_zona` (JSONB, aditivo
+sobre las columnas escalares). Sin esto, las 6 zonas del ranking IPP
+compartían el mismo dato satelital y solo la salinidad esperada por zona
+discriminaba el ranking.
+
+Con el box más chico, `_CHL_STRIDE` bajó de 10 a 5 (~1.4 km en vez de ~2.8 km)
+para mantener suficientes píxeles por zona tras el enmascarado de nubes — el
+conteo neto de filas descargadas sigue siendo menor que antes, porque el área
+cubierta también se redujo.
+
+## Procedencia de datos (medido / cache / baseline / sin_dato)
+
+**Estado:** implementado.
+
+Antes, si ERDDAP fallaba o el valor caía fuera de rango, se persistía el
+baseline histórico (28.0°C / 4.5 mg/m³) en `satellite_data` exactamente igual
+que un valor medido — sin forma de distinguir después cuál fue cuál.
+`get_sst()`/`get_chlorophyll()` ahora retornan `{"box", "origen", "por_zona"}`
+con `origen` en `"medido" | "baseline"`; `dashboard_service._save_satellite`
+escribe `NULL` en la columna cuando el origen es `"baseline"` — ausencia real
+en vez de un número que parece medición. El mismo patrón (`"medido" | "cache"
+| "sin_dato"`) aplica a `weather.py` para Open-Meteo.
+
+---
+
 ## Deuda conocida
 
 La tabla `satellite_data` guarda SST y clorofila en la misma fila con `source="nasa_mur"`.

@@ -1,7 +1,7 @@
 # Base de Conocimiento — CienaNet Bot
 
 > Documento de referencia rápida para el equipo de desarrollo.  
-> Última actualización: 2026-06-26
+> Última actualización: 2026-07-28
 
 ---
 
@@ -12,7 +12,7 @@
 
 El backend alimenta primero el dashboard con datos de fuentes externas + sensores IoT propios. El bot WhatsApp consume los mismos datos.
 
-**Stack:** Python 3.11 + FastAPI + Supabase (PostgreSQL) + Vercel serverless (Mangum).  
+**Stack:** Python 3.11 + FastAPI + Supabase (PostgreSQL), desplegado en el servidor universitario.  
 Ver [STACK.md](./STACK.md) para decisiones completas.
 
 ---
@@ -39,10 +39,16 @@ app/
 │   ├── sensor_service.py
 │   ├── alert_service.py
 │   ├── ai_service.py
+│   ├── message_router.py     # enruta intención del pescador (bot WhatsApp)
+│   ├── dashboard_service.py  # get_latest_snapshot() — camino de ESCRITURA (llama APIs + persiste)
+│   ├── snapshot_service.py   # read_persisted() — camino de LECTURA (cero red, lee lo ya persistido)
+│   ├── points_service.py, sedimentation_service.py, system_status_service.py
+│   ├── semaphore.py, ipp.py, derived.py
+│   ├── trends.py   # tendencias 24h/7d desde lo persistido (delta, dirección, lluvia 72h)
+│   ├── signals.py  # señales compuestas (anoxia, pulso de agua dulce) — ESTIMACIONES, no mediciones
 │   └── ingestion/         # Una carpeta para servicios de datos externos
-│       ├── weather.py     # Open-Meteo
-│       ├── satellite.py   # NASA ERDDAP (SST + Clorofila)
-│       ├── marine.py      # Copernicus Marine (backup SST)
+│       ├── weather.py     # Open-Meteo (incluye ráfaga wind_gusts_10m)
+│       ├── satellite.py   # NASA ERDDAP (SST) + Sentinel-3 OLCI vía NOAA CoastWatch (clorofila), por zona
 │       └── alerts_ext.py  # NOAA NHC ciclones
 │
 ├── models/
@@ -61,16 +67,9 @@ app/
 │   └── dashboard.py       # Pydantic: AskRequest/AskResponse, AIHistoryItem — /dashboard/ai/*
 │
 └── main.py
-
-api/
-└── index.py               # Vercel entry point (Mangum)
-
-frontend/                  # Dashboard Next.js (App Router), deploy Vercel separado
-├── app/
-│   ├── dashboard/{mapa,graficas,ia,sistema}/page.tsx
-│   └── api/{admin,data}/*/route.ts   # Proxies al backend FastAPI
-└── components/{map,charts,ia,ui}/
 ```
+
+Dashboard Next.js: repo separado, `CienaRed-Frontend` (deploy Vercel).
 
 Regla de dependencias: `routers → services → models`. Los routers nunca tocan modelos directamente.
 
@@ -135,53 +134,51 @@ HISTORICAL_URL = "https://archive-api.open-meteo.com/v1/archive"
 # Mismo cliente, agregar "start_date": "2020-01-01", "end_date": "2024-12-31"
 ```
 
-### 4.2 NASA ERDDAP — SST y Clorofila
+### 4.2 NASA ERDDAP — SST y Clorofila (por zona + procedencia)
+
+Implementación real en `app/services/ingestion/satellite.py` — el snippet de
+abajo es un resumen simplificado, no el código completo (per-zona real usa
+`ZONES` de `app/services/ipp.py`, ver §6).
 
 ```python
 # pip install erddapy xarray netCDF4
 from erddapy import ERDDAP
 
-ERDDAP_SERVER = "https://coastwatch.pfeg.noaa.gov/erddap"
+ERDDAP_SERVER = "https://coastwatch.pfeg.noaa.gov/erddap"       # SST (NASA MUR)
+NOAA_CW_SERVER = "https://coastwatch.noaa.gov/erddap"           # Clorofila (Sentinel-3 OLCI)
 
-# Bounding box Ciénaga Grande
-LAT_MIN, LAT_MAX = 10.5, 11.2
-LON_MIN, LON_MAX = -74.85, -73.9
+# Bounding box Ciénaga Grande — ajustado a los 3 vértices medidos en campo (§12).
+# El box anterior (10.5-11.2, -74.85/-73.9) "cubría" los vértices con tanto
+# margen que el promedio mezclaba mar Caribe abierto y tierra con la laguna.
+LAT_MIN, LAT_MAX = 10.54, 11.01
+LON_MIN, LON_MAX = -74.69, -74.32
 
-def get_sst(date_str: str) -> float:
-    """Retorna SST promedio para la Ciénaga. date_str formato: '2024-01-15'"""
+def get_sst(date_str: str) -> dict:
+    """Retorna {"box": valor, "origen": "medido"|"baseline", "por_zona": {...}}.
+    dataset_id real: jplMURSST41 (lag ~2 días). "origen" distingue una
+    medición real de la caída al baseline histórico (28.0°C) — nunca se
+    persiste un baseline como si fuera medición (ver dashboard_service.py)."""
     e = ERDDAP(server=ERDDAP_SERVER, protocol="griddap")
     e.dataset_id = "jplMURSST41"
     e.griddap_initialize()
     e.constraints = {
-        "time>=": f"{date_str}T09:00:00Z",
-        "time<=": f"{date_str}T09:00:00Z",
-        "latitude>=": LAT_MIN,
-        "latitude<=": LAT_MAX,
-        "longitude>=": LON_MIN,
-        "longitude<=": LON_MAX,
+        "time>=": f"{date_str}T09:00:00Z", "time<=": f"{date_str}T09:00:00Z",
+        "latitude>=": LAT_MIN, "latitude<=": LAT_MAX,
+        "longitude>=": LON_MIN, "longitude<=": LON_MAX,
     }
     e.variables = ["analysed_sst"]
     ds = e.to_xarray()
-    sst_celsius = float(ds["analysed_sst"].mean()) - 273.15  # Kelvin → Celsius
-    return round(sst_celsius, 2)
+    box_sst = float(ds["analysed_sst"].mean()) - 273.15  # Kelvin → Celsius
+    # + un .sel(latitude=zona_lat, longitude=zona_lng, method="nearest") por cada
+    # una de las 6 zonas del IPP, para el desglose por_zona (ver satellite.py real)
+    ...
 
-def get_chlorophyll(date_str: str) -> float:
-    """Clorofila-a promedio (mg/m³). Usa compuesto 8 días."""
-    e = ERDDAP(server=ERDDAP_SERVER, protocol="griddap")
-    e.dataset_id = "erdMH1chla8day"
-    e.griddap_initialize()
-    e.constraints = {
-        "time>=": f"{date_str}T00:00:00Z",
-        "time<=": f"{date_str}T00:00:00Z",
-        "latitude>=": LAT_MIN,
-        "latitude<=": LAT_MAX,
-        "longitude>=": LON_MIN,
-        "longitude<=": LON_MAX,
-    }
-    e.variables = ["chlorophyll"]
-    ds = e.to_xarray()
-    chl = float(ds["chlorophyll"].mean())
-    return round(chl, 3) if 0 < chl < 100 else 4.5  # fallback histórico
+def get_chlorophyll(start_str: str) -> dict:
+    """Sentinel-3 OLCI vía NOAA CoastWatch (no NASA MODIS — migrado, ver
+    RESOLUCION_FUENTES.md). Retorna {"box", "origen", "por_zona"}: la respuesta
+    griddap ya trae latitude/longitude por fila, se promedia también dentro de
+    un radio (~5 km) de cada centroide de zona, no solo el box completo."""
+    ...
 ```
 
 ### 4.3 NOAA NHC — Alertas ciclones (RSS)
@@ -271,6 +268,10 @@ class SensorReading(BaseModel):
             raise ValueError("pH fuera de rango")
         return v
 
+    # + validadores análogos para conductivity_mscm (0-80 mS/cm) y water_level_cm
+    # (0-500 cm) — trust boundary contra sonda desconectada (pega en 0 o en un
+    # riel tipo 1000+), no control de calidad fino. Rechaza con 422.
+
 # routers/sensors.py
 from fastapi import APIRouter, Depends, HTTPException, Header
 from app.services.sensor_service import process_reading
@@ -294,98 +295,120 @@ async def ingest(
 
 ---
 
-## 5. Semáforo de condiciones (lógica validada del prototipo)
+## 5. Semáforo de condiciones (`app/services/semaphore.py`, código real)
+
+Sin oxígeno disuelto ni turbidez: no hay sensor real para esas dos variables
+(no hay columnas en `SensorReading`) — se quitaron del prototipo original en
+vez de rellenarlas con un default fijo que no aportaba señal.
 
 ```python
-# services/semaphore.py
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class SemaphoreResult:
-    color: str        # "green" | "yellow" | "red"
+    color: str   # "green" | "yellow" | "red"
     emoji: str
     reason: str
     safe: bool
+    datos_faltantes: list[str] = field(default_factory=list)
+
+_WIND_MAX = 30.0   # km/h sostenido — VALIDAR CON PESCADORES (canoa de madera)
+_GUST_MAX = 45.0   # km/h en ráfaga
+_PRECIP_MAX = 10.0 # mm
 
 def evaluate(weather: dict, satellite: dict, water: dict) -> SemaphoreResult:
-    wind_kmh = weather.get("wind_speed", 0)
-    gust_kmh = wind_kmh * 1.4   # ponytail: estimado, wttr.in no entrega ráfagas
-    precip_mm = weather.get("precipitation", 0)
-    oxygen = water.get("dissolved_oxygen_mgl")
+    wind_kmh = weather.get("wind_speed_kmh")
+    gust_kmh = weather.get("wind_gust_kmh")  # Open-Meteo SÍ la entrega (wind_gusts_10m)
+    precip_mm = weather.get("precipitation_mm")
 
-    # ROJO
-    if wind_kmh > 30 or gust_kmh > 45 or precip_mm > 10:
+    # Desconocido ≠ seguro: si no hay ni viento ni lluvia, el check de rojo
+    # nunca corrió — no hay base para afirmar que es seguro salir.
+    if wind_kmh is None and precip_mm is None:
+        return SemaphoreResult("yellow", "🟡", "Sin datos de viento ni lluvia — no puedo "
+                                "confirmar si es seguro salir", False, ["viento", "lluvia"])
+
+    # ROJO — cada check solo corre si hay dato; sin ráfaga no se inventa una.
+    if ((wind_kmh is not None and wind_kmh > _WIND_MAX)
+            or (gust_kmh is not None and gust_kmh > _GUST_MAX)
+            or (precip_mm is not None and precip_mm > _PRECIP_MAX)):
         return SemaphoreResult("red", "🔴", "Viento o lluvia peligrosa", False)
-    if oxygen and oxygen < 3.0:
-        return SemaphoreResult("red", "🔴", "Oxígeno disuelto crítico", False)
 
-    # AMARILLO
-    sst = satellite.get("sst_celsius", 28)
-    salinity = water.get("salinity_psu", 15)
-    turbidity = water.get("turbidity_ntu", 50)
-    if not (25 <= sst <= 32) or salinity > 32 or turbidity > 120:
+    # AMARILLO — sin dato real, el check simplemente no corre (no rellena con default)
+    sst = satellite.get("sst_celsius")
+    salinity = water.get("salinity_psu")
+    if sst is not None and not (25 <= sst <= 32):
+        return SemaphoreResult("yellow", "🟡", "Temperatura del agua fuera de rango", True)
+    if salinity is not None and salinity > 32:
         return SemaphoreResult("yellow", "🟡", "Condiciones de precaución", True)
-    if oxygen and 3.0 <= oxygen <= 4.5:
-        return SemaphoreResult("yellow", "🟡", "Oxígeno bajo, precaución", True)
 
     return SemaphoreResult("green", "🟢", "Condiciones favorables", True)
 ```
 
+Antes, `gust_kmh = wind_kmh * 1.4` era un estimado heredado del prototipo
+(wttr.in no entregaba ráfagas); Open-Meteo sí las entrega (`wind_gusts_10m`,
+columna `weather_snapshots.wind_gust_kmh`), así que ya no se inventa.
+
 ---
 
-## 6. Índice de Potencial Pesquero (IPP)
+## 6. Índice de Potencial Pesquero (IPP) — `app/services/ipp.py`, código real
+
+Oxígeno disuelto y turbidez salieron del cálculo (mismo motivo que el
+semáforo: sin sensor real, un default fijo no aporta señal). El peso que
+tenían (0.35 combinado) se redistribuyó proporcionalmente entre las 4 señales
+que sí varían con dato observado.
 
 ```python
-# services/ipp.py
-WEIGHTS = {"oxygen": 0.25, "sst": 0.20, "salinity": 0.20,
-           "chlorophyll": 0.15, "turbidity": 0.10, "ph": 0.10}
+WEIGHTS = {"sst": 0.31, "salinity": 0.31, "chlorophyll": 0.23, "ph": 0.15}
 
+# lat/lng: 3 de 6 medidas en campo (§12 — Tasajera, Buenavista, Nueva Venecia);
+# las otras 3 son estimadas, pendientes de validar (tarea DG-05, ver TAREAS_EQUIPO.md)
 ZONES = [
-    {"name": "Boca de la Barra",       "sal_min": 20, "sal_max": 36},
-    {"name": "Nueva Venecia",           "sal_min":  8, "sal_max": 22},
-    {"name": "Buenavista",             "sal_min":  5, "sal_max": 18},
-    {"name": "Caño Clarín",            "sal_min":  2, "sal_max": 12},
-    {"name": "Tasajera/Puebloviejo",   "sal_min":  3, "sal_max": 15},
-    {"name": "Suroccidente",           "sal_min":  0, "sal_max":  8},
+    {"name": "Boca de la Barra",     "sal_min": 20, "sal_max": 36, "lat": 10.985,    "lng": -74.345},    # estimada
+    {"name": "Nueva Venecia",         "sal_min":  8, "sal_max": 22, "lat": 10.828694, "lng": -74.574500}, # medida
+    {"name": "Buenavista",           "sal_min":  5, "sal_max": 18, "lat": 10.841333, "lng": -74.510139}, # medida
+    {"name": "Caño Clarín",          "sal_min":  2, "sal_max": 12, "lat": 10.900,    "lng": -74.640},    # estimada
+    {"name": "Tasajera/Puebloviejo", "sal_min":  3, "sal_max": 15, "lat": 10.976111, "lng": -74.325833}, # medida
+    {"name": "Suroccidente",         "sal_min":  0, "sal_max":  8, "lat": 10.700,    "lng": -74.590},    # estimada
 ]
 
-def _score_oxygen(v: float) -> float:
-    if v >= 8: return 100
-    if v >= 4.5: return 60
-    if v >= 3: return 20
-    return 0
+def _trapezoid(v, cero_lo, opt_lo, opt_hi, cero_hi) -> float:
+    """0 fuera de [cero_lo, cero_hi], 100 en la meseta [opt_lo, opt_hi], lineal
+    en los hombros — reemplaza los escalones del prototipo (26.1°C y 29.9°C ya
+    no puntúan igual)."""
+    ...
 
-def _score_sst(v: float) -> float:
-    return 100 if 26 <= v <= 30 else (60 if 24 <= v <= 32 else 20)
+_SST_BREAKS = (22.0, 26.0, 30.0, 34.0)
+_CHL_BREAKS = (1.0, 10.0, 30.0, 80.0)  # mg/m³ — VALIDAR CON DIEGO
+_PH_BREAKS = (6.0, 7.0, 8.5, 9.5)
+_SAL_HOMBRO = 6.0  # PSU de tolerancia fuera del rango de zona
 
-def _score_salinity(v: float, zone_min: float, zone_max: float) -> float:
-    return 100 if zone_min <= v <= zone_max else 0
-
-def _score_chlorophyll(v: float) -> float:
-    return min(100, v * 10)  # escala simple; >10 mg/m³ = saturación
-
-def _score_turbidity(v: float) -> float:
-    return 100 if v < 30 else (60 if v < 80 else 20)
-
-def _score_ph(v: float) -> float:
-    return 100 if 7.0 <= v <= 8.5 else 30
+# _score_chlorophyll ya NO es `min(100, v*10)` (monótona, saturaba en 100 con
+# cualquier valor OLCI real de 8-80 mg/m³) — ahora es un trapecio unimodal:
+# el exceso de clorofila es floración → respiración nocturna → anoxia, así
+# que 60 mg/m³ puntúa peor que 20 mg/m³, no mejor.
 
 def calculate_ipp(water: dict, satellite: dict, zone: dict) -> float:
-    scores = {
-        "oxygen":     _score_oxygen(water.get("dissolved_oxygen_mgl", 6)),
-        "sst":        _score_sst(satellite.get("sst_celsius", 28)),
-        "salinity":   _score_salinity(water.get("salinity_psu", 15),
-                                       zone["sal_min"], zone["sal_max"]),
-        "chlorophyll":_score_chlorophyll(satellite.get("chlorophyll_mgm3", 4.5)),
-        "turbidity":  _score_turbidity(water.get("turbidity_ntu", 50)),
-        "ph":         _score_ph(water.get("ph", 7.5)),
-    }
-    return round(sum(scores[k] * WEIGHTS[k] for k in WEIGHTS), 1)
+    """Solo puntúa las señales con dato real y renormaliza los pesos sobre
+    ellas — sin sensores, antes se rellenaba con defaults (sst=28, salinity=15,
+    ph=7.5) indistinguibles de una medición real. Ver ipp_cobertura()."""
+    ...
+
+def ipp_cobertura(water: dict, satellite: dict) -> float:
+    """Fracción del peso total (0.0-1.0) que tuvo dato real — expuesta junto
+    al IPP en cada zona/punto. Un IPP con cobertura baja está calculado sobre
+    poca señal real, aunque el número en sí luzca normal."""
+    ...
 
 def rank_zones(water: dict, satellite: dict) -> list[dict]:
-    results = [{"zone": z["name"], "ipp": calculate_ipp(water, satellite, z)} for z in ZONES]
-    return sorted(results, key=lambda x: x["ipp"], reverse=True)
+    """satellite puede traer un "por_zona" con SST/clorofila específicos de
+    cada zona (ver §4.2) — si existe, se usa en vez de la media del box."""
+    ...  # [{"zone": ..., "ipp": ..., "cobertura": ...}, ...]
 ```
+
+`rank_points()` es la misma lógica pero sobre `fishing_points` reales
+(FishingPoint ORM): a cada punto se le asigna la zona IPP de centroide más
+cercano (distancia euclidiana simple en grados), y usa el satélite de esa
+zona — no el promedio global.
 
 ---
 
@@ -404,25 +427,30 @@ sensor_readings (
     created_at TIMESTAMPTZ DEFAULT now()
 )
 
--- Snapshots meteorológicos (Open-Meteo)
+-- Snapshots meteorológicos (Open-Meteo) — estacion/humidity_pct: migración 010;
+-- wind_gust_kmh: migración 011 (ráfaga real, wind_gusts_10m)
 weather_snapshots (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source VARCHAR(50) DEFAULT 'open-meteo',
+    estacion VARCHAR(50) DEFAULT 'CGSM',   -- 'CGSM' | 'Tasajera'
     timestamp TIMESTAMPTZ NOT NULL,
     temperature_c FLOAT,
+    humidity_pct FLOAT,
     wind_speed_kmh FLOAT,
     wind_direction_deg FLOAT,
+    wind_gust_kmh FLOAT,
     precipitation_mm FLOAT,
     created_at TIMESTAMPTZ DEFAULT now()
 )
 
--- Datos satelitales (NASA ERDDAP)
+-- Datos satelitales (NASA ERDDAP / NOAA CoastWatch) — por_zona: migración 012
 satellite_data (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source VARCHAR(50),             -- 'nasa_mur' | 'modis_aqua' | 'copernicus'
+    source VARCHAR(50),             -- 'nasa_mur' (SST y clorofila, ver RESOLUCION_FUENTES.md)
     date DATE NOT NULL,
-    sst_celsius FLOAT,
-    chlorophyll_mgm3 FLOAT,
+    sst_celsius FLOAT,               -- media del box; NULL si la fuente cayó a baseline (no se persiste como medición)
+    chlorophyll_mgm3 FLOAT,          -- ídem
+    por_zona JSONB,                  -- {"<zona>": {"sst_celsius": .., "chlorophyll_mgm3": ..}}, aditivo sobre lo de arriba
     created_at TIMESTAMPTZ DEFAULT now()
 )
 
@@ -463,16 +491,25 @@ async def latest_conditions(db=Depends(get_db)):
     """Retorna el estado ambiental más reciente para el dashboard."""
     return await get_latest_snapshot(db)
 
-# Respuesta ejemplo:
+# Respuesta ejemplo (campos reales de DashboardSnapshot, app/schemas/environmental.py):
 # {
 #   "semaphore": {"color": "green", "reason": "Condiciones favorables"},
-#   "weather": {"wind_speed_kmh": 12, "temp_c": 28, "precipitation_mm": 0},
+#   "weather": {"wind_speed_kmh": 12, "wind_gust_kmh": 18, "temperature_c": 28, "precipitation_mm": 0},
 #   "satellite": {"sst_celsius": 27.4, "chlorophyll_mgm3": 3.8, "date": "2026-06-24"},
-#   "sensors": [{"zone": "Boca de la Barra", "ph": 7.8, "temp_c": 29.1}],
-#   "ipp_ranking": [{"zone": "Caño Clarín", "ipp": 82.5}, ...],
+#   "sensors": [{"zone": "Boca de la Barra", "ph": 7.8, "temperature_c": 29.1, "water_level_cm": 44.0}],
+#   "ipp_ranking": [{"zone": "Caño Clarín", "ipp": 82.5, "cobertura": 1.0}, ...],
 #   "cyclone_alerts": [],
+#   "tendencias": {"variables": {"salinity_psu": {"actual": 15.2, "delta_24h": -0.3, "delta_7d": -1.8, "direccion": "bajando"}}, "lluvia_72h_mm": 12.0},
+#   "senales": {"anoxia": {"score": 22.0, "nivel": "bajo", "factores": [], "n_factores": 3, "estimacion": true}, "pulso_agua_dulce": null},
+#   "origen": {"weather": "medido", "tasajera_weather": "medido", "satellite": {"sst_celsius": "medido", "chlorophyll_mgm3": "medido"}, "water": "medido"},
 #   "updated_at": "2026-06-26T14:30:00Z"
 # }
+#
+# "cobertura" (0-1): fracción del peso IPP con dato real, no defaults inventados.
+# "origen": procedencia por fuente — "medido" | "cache" | "baseline" | "sin_dato".
+# Un valor "baseline" NUNCA se persiste en satellite_data como si fuera medición
+# (queda NULL en DB); "tendencias"/"senales" son agregados calculados al vuelo
+# desde lo ya persistido (trends.py, signals.py), no tienen tabla propia.
 ```
 
 ---
@@ -540,7 +577,6 @@ copernicusmarine>=1.0 # Backup Copernicus (opcional)
 sqlalchemy>=2.0
 alembic>=1.13
 # SDK de IA: agregar el del proveedor elegido (ej: groq, openai, anthropic, etc.)
-mangum>=0.19          # Vercel
 ```
 
 ---
@@ -560,7 +596,7 @@ La Ciénaga tiene forma aproximada de triángulo apuntando hacia el sur.
 | Nueva Venecia (palafito) | 10°49'43.3"N 74°34'28.2"W | 10.828694, -74.574500 | Pueblo palafítico de referencia |
 
 Notas:
-- El bounding box de NASA ERDDAP (`app/services/ingestion/satellite.py`, `LAT_MIN/MAX = 10.5/11.2`, `LON_MIN/MAX = -74.85/-73.9`) ya cubre los 3 vértices reales, no requiere cambios.
+- El bounding box de NASA ERDDAP (`app/services/ingestion/satellite.py`) se ajustó de `LAT_MIN/MAX = 10.5/11.2`, `LON_MIN/MAX = -74.85/-73.9` a `10.54/11.01`, `-74.69/-74.32` (migración 012): el box anterior "cubría" los 3 vértices con tanto margen que el promedio mezclaba mar Caribe abierto al norte y tierra al este con el agua de la laguna. Cubrir los vértices no es lo mismo que ajustarse a ellos. Corte de continuidad: los valores de `satellite_data` guardados antes de este cambio promedian un área mayor y no son directamente comparables con los de después.
 - `CIENAGA_LAT`/`CIENAGA_LON` (config.py y `.env.example`) se actualizaron de `10.8, -74.4` (aproximado) al centroide real `10.859056, -74.460611`.
 - Los puntos de pesca en `alembic/versions/003_fishing_points.py` (incluyendo un punto llamado "Tasajera" en `10.972, -74.434`) son datos comunitarios ilustrativos, no coinciden con estas coordenadas medidas — pendiente de validar/corregir con el equipo territorial si se requiere precisión geográfica real en ese seed data.
 

@@ -90,6 +90,13 @@ Content-Type: application/json
 
 Campos opcionales (`ph`, `conductivity_mscm`, `temperature_c`, `water_level_cm`) — enviar `null` u omitir los que el sensor no mida. `battery_mv`/`signal_rssi` aún no están en el schema; si se necesitan, agregar campos a `SensorReadingIn`.
 
+Validación de rango (fuera de rango → `422`, no se persiste): `ph` 0–14,
+`temperature_c` -5–45°C, `conductivity_mscm` 0–80 mS/cm, `water_level_cm`
+0–500 cm. Es un cambio de contrato respecto a versiones previas del firmware
+que mandaban valores fuera de estos rangos sin problema — un firmware con
+buffer local que reintenta sobre un valor pegado ahora fallará indefinidamente
+en vez de contaminar el snapshot; avisar al equipo de firmware si esto pasa.
+
 ### Respuesta esperada
 ```json
 {
@@ -130,7 +137,21 @@ Basados en estudios de la Ciénaga Grande de Santa Marta (INVEMAR):
 
 **Nota:** Estos umbrales deben validarse con pescadores locales y con Diego (análisis territorial). Los valores del INVEMAR son referencia, no son absolutos.
 
-**Nota de implementación:** estos rangos no se enforcen en `POST /sensors/ingest` — el endpoint solo valida y persiste la lectura (`process_reading()` en `app/services/sensor_service.py`). La evaluación de alerta ocurre después, sobre el snapshot agregado, en `app/services/semaphore.py` y `app/services/alert_service.py`.
+**Nota de implementación (actualizada):** estos umbrales finos (leve/crítica)
+siguen sin enforcerse en `POST /sensors/ingest` — la evaluación de alerta
+ocurre después, sobre el snapshot agregado, en `app/services/semaphore.py` y
+`app/services/alert_service.py`. Lo que **sí** se valida en el ingest
+(`SensorReadingIn`, `app/schemas/sensor.py`) es un rango de **trust
+boundary** mucho más ancho que estos umbrales de alerta — atrapa la sonda
+desconectada o pegada en un riel, no control de calidad fino:
+`conductivity_mscm` 0–80 mS/cm y `water_level_cm` 0–500 cm, rechazando con
+`422` fuera de rango (mismo patrón que `ph` 0–14 y `temperature_c` -5–45°C,
+que ya existían). No confundir este rango de ingesta con la tabla de arriba.
+
+**Frescura de lectura:** `get_latest_readings()` (`app/services/sensor_service.py`)
+filtra por `Sensor.active` y por antigüedad máxima (6h por defecto) — una
+lectura vieja de un sensor desconectado ya no sigue alimentando el snapshot
+agregado indefinidamente.
 
 ---
 

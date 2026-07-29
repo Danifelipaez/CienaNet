@@ -181,6 +181,12 @@ Revisar los umbrales actuales en [KNOWLEDGE_BASE.md §5](./KNOWLEDGE_BASE.md) y 
 - Preguntas clave: ¿30 km/h es el límite real para pescadores artesanales en canoa? ¿O es menos?
 - Resultado: tabla de umbrales revisados con fuentes
 
+> **Nota (2026-07):** la ráfaga (`gust_kmh`) ya no es un estimado
+> (`viento × 1.4`) — viene real de Open-Meteo (`wind_gusts_10m`). Esto hace
+> el umbral de 45 km/h en ráfaga mucho más relevante que antes (antes casi
+> nunca disparaba, dominado por el de 30 km/h sostenido); validar ambos
+> números con pescadores es más urgente ahora que antes de este cambio.
+
 ### DG-03: Explorar datos históricos para ML
 - Descargar histórico Open-Meteo (1990–2024) para la Ciénaga
 - Descargar histórico SST NASA ERDDAP (2002–2024)
@@ -199,6 +205,18 @@ Basado en DG-03, proponer:
 - Definir polígonos o puntos representativos de cada zona (para los sensores ESP32 y el dashboard)
 - Herramienta sugerida: [geojson.io](https://geojson.io) para dibujar + exportar GeoJSON
 - Resultado: archivo `data/zones.geojson` con las 6 zonas del IPP
+
+> **Estado parcial (2026-07):** `app/services/ipp.py::ZONES` ya tiene un
+> `lat`/`lng` por zona — se usan para desglosar SST/clorofila por zona en vez
+> de un promedio único para toda la Ciénaga (ver
+> [`docs/RESOLUCION_FUENTES.md`](./RESOLUCION_FUENTES.md)). **3 de 6 son
+> medidas** (Tasajera/Puebloviejo, Buenavista, Nueva Venecia — de
+> [`docs/KNOWLEDGE_BASE.md`](./KNOWLEDGE_BASE.md) §12); **las otras 3 son
+> estimadas** (Boca de la Barra, Caño Clarín, Suroccidente) y están marcadas
+> como tal en el código — siguen pendientes de que Diego las valide. Una zona
+> mal ubicada es peor que el promedio global anterior porque *parece* precisa.
+> Esto no reemplaza el `data/zones.geojson` con polígonos completos que sigue
+> pendiente; son solo los 6 puntos mínimos para el desglose satelital.
 
 ---
 

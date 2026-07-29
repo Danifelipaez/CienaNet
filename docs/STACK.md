@@ -10,21 +10,12 @@
 - Ecosistema Python para datos (pandas, numpy) — útil cuando integremos datos satelitales
 - Curva de aprendizaje baja para el equipo (Valentina ya conoce Python)
 
-**Librería de adaptador para Vercel:** `mangum` (adapta ASGI → AWS Lambda / Vercel serverless)
-
-### Plataforma: Vercel
-**Por qué Vercel:**
-- Deploy automático desde GitHub en cada push a `main`
-- Preview deployments en PRs (staging automático)
-- Free tier generoso para MVP
-- Variables de entorno gestionadas en dashboard
-- HTTPS automático
-
-**Alternativa si Vercel se queda corto:** Railway o Render (mejor soporte para procesos persistentes)
-
-**Actualización:** el servidor universitario es ahora el deployment principal
-de producción (recibe el webhook de Meta y corre el scheduler); Vercel pasó a
-ser respaldo/staging. Ver [DEPLOYMENT.md](./DEPLOYMENT.md).
+### Plataforma backend: servidor universitario
+Proceso persistente (Docker o systemd+uvicorn) — único destino de
+producción, recibe el webhook de Meta y corre el scheduler. Vercel se usó en
+su momento como respaldo/staging serverless (Mangum) pero se dejó de usar
+para el backend: sin límite de timeout por función y con soporte real de
+procesos de larga duración no hacía falta. Ver [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ### Base de Datos: Supabase (PostgreSQL)
 **Por qué Supabase:**
@@ -46,18 +37,20 @@ ser respaldo/staging. Ver [DEPLOYMENT.md](./DEPLOYMENT.md).
 **Autenticación:** Token permanente de System User (no token de usuario de 60 días)
 
 ### Frontend: Next.js (App Router) + Leaflet
-Dashboard científico, deploy Vercel separado del backend (`frontend/`, repo mismo, proyecto Vercel distinto):
+Dashboard científico, **repo separado** (`CienaRed-Frontend`), deploy Vercel:
 - **Next.js 16 (App Router) + TypeScript + React 19** — rutas `dashboard/{mapa,graficas,ia,sistema}`
 - **Leaflet** — mapa interactivo de puntos de pesca / zonas IPP (`components/map/`)
-- **Route handlers propios** (`frontend/app/api/{admin,data}/*`) — proxean al backend FastAPI en vez de exponer `ADMIN_API_KEY` al navegador
+- **Route handlers propios** (`app/api/{admin,data}/*`) — proxean al backend FastAPI en vez de exponer `ADMIN_API_KEY` al navegador
 - No usa un SDK de gráficos externo pesado; charts en `components/charts/` sobre datos de `/data/history`
 
 ### CI/CD: GitHub Actions + Vercel + deploy manual (universidad)
 ```
-Push a main → Vercel auto-deploy (respaldo/staging)
-Push a dev  → Vercel preview deploy (staging)
-PR abierto  → Tests en GitHub Actions → Preview deploy
-Servidor universitario → deploy manual (git pull + docker compose up -d --build), ver DEPLOYMENT.md
+Backend:
+  PR abierto → Tests en GitHub Actions
+  Servidor universitario → deploy manual (git pull + docker compose up -d --build), ver DEPLOYMENT.md
+
+Frontend (repo CienaRed-Frontend):
+  Push a main → Vercel auto-deploy (producción)
 ```
 
 ### IoT: Arduino + ESP32
@@ -85,7 +78,6 @@ Para procesar mensajes de texto libre en WhatsApp y las respuestas del asistente
 python              >= 3.11
 fastapi             >= 0.115
 uvicorn[standard]   >= 0.32
-mangum              >= 0.19
 pydantic            >= 2.9
 pydantic-settings   >= 2.5
 sqlalchemy          >= 2.0
@@ -133,9 +125,9 @@ RUN_SCHEDULER=            # true SOLO en el deployment dueño del scheduler (ver
 
 | Tecnología | Razón de descarte |
 |------------|-------------------|
-| Next.js / Node como **backend** | El equipo domina Python; no hay ventaja real. (Next.js sí se usa para el **frontend** — dashboard en `frontend/`, deploy Vercel separado — eso es una decisión distinta, no contradice esto) |
+| Next.js / Node como **backend** | El equipo domina Python; no hay ventaja real. (Next.js sí se usa para el **frontend** — repo separado `CienaRed-Frontend`, deploy Vercel — eso es una decisión distinta, no contradice esto) |
 | Twilio WhatsApp | Costo adicional por mensaje; somos estudiantes |
 | Firebase | Vendor lock-in, pricing impredecible |
 | MongoDB | SQL es mejor para datos de series temporales de sensores |
-| AWS Lambda directo | Vercel abstrae esto sin perder flexibilidad |
+| Vercel serverless para el backend | Se usó como respaldo/staging al inicio; el servidor universitario cubre producción como proceso persistente, sin límites de timeout ni necesidad de Mangum |
 | Django | Demasiado framework para una API; FastAPI es suficiente |
