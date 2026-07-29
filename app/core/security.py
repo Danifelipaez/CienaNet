@@ -17,6 +17,10 @@ def verify_hmac_meta(payload: bytes, signature_header: str) -> bool:
     constante para evitar timing attacks. Llamar SIEMPRE antes de parsear
     el body del webhook.
     """
+    if not settings.whatsapp_app_secret or not signature_header:
+        # Sin secreto configurado, hmac.new firmaría con clave vacía y cualquier
+        # firma calculada igual pasaría — fallar cerrado en vez de fallar abierto.
+        return False
     expected = hmac.new(
         settings.whatsapp_app_secret.encode(),
         payload,

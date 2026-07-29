@@ -33,7 +33,7 @@ async def get_weather_forecast(lat: float | None = None, lon: float | None = Non
     now = time.monotonic()
     cached = _cache.get(key)
     if cached and now - cached["ts"] < _TTL:
-        return cached["data"]
+        return cached["data"]  # dentro del TTL: ya trae origen="medido" de cuando se guardó
 
     params = {
         "latitude": lat,
@@ -43,6 +43,7 @@ async def get_weather_forecast(lat: float | None = None, lon: float | None = Non
             "relative_humidity_2m",
             "wind_speed_10m",
             "wind_direction_10m",
+            "wind_gusts_10m",
             "precipitation",
         ],
         "timezone": "America/Bogota",
@@ -62,7 +63,9 @@ async def get_weather_forecast(lat: float | None = None, lon: float | None = Non
                 "humidity_pct": current.get("relative_humidity_2m"),
                 "wind_speed_kmh": current.get("wind_speed_10m"),
                 "wind_direction_deg": current.get("wind_direction_10m"),
+                "wind_gust_kmh": current.get("wind_gusts_10m"),
                 "precipitation_mm": current.get("precipitation"),
+                "origen": "medido",
             }
             _cache[key] = {"data": result, "ts": now}
             return result
@@ -73,11 +76,16 @@ async def get_weather_forecast(lat: float | None = None, lon: float | None = Non
 
     logger.warning("Open-Meteo no disponible tras reintentos (%s, %s): %s", lat, lon, last_exc)
     if cached:
-        return cached["data"]
+        # El fetch fresco falló y este cache ya venció su TTL (si no, se habría
+        # devuelto arriba) — sigue siendo el mejor dato disponible, pero hay que
+        # nombrarlo distinto de "medido" para no ocultar que está rancio.
+        return {**cached["data"], "origen": "cache"}
     return {
         "temperature_c": None,
         "humidity_pct": None,
         "wind_speed_kmh": None,
         "wind_direction_deg": None,
+        "wind_gust_kmh": None,
         "precipitation_mm": None,
+        "origen": "sin_dato",
     }

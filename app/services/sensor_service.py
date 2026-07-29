@@ -1,6 +1,6 @@
 """Lógica de ingesta y consulta de lecturas de sensores ESP32 (V-04)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,10 @@ from sqlalchemy.orm import selectinload
 from app.models.environmental import Sensor, SensorReading
 from app.schemas.sensor import SensorReadingIn
 from app.services.derived import salinity_psu, tds_mgl
+
+_MAX_AGE_HOURS = 6  # ponytail: una lectura de hace más de 6h no describe el agua de
+                    # ahora. Subir a un umbral por sensor si la red crece a nodos con
+                    # cadencias distintas.
 
 
 async def process_reading(reading: SensorReadingIn, sensor: Sensor, db: AsyncSession) -> None:
@@ -27,10 +31,16 @@ async def process_reading(reading: SensorReadingIn, sensor: Sensor, db: AsyncSes
     await db.commit()
 
 
-async def get_latest_readings(db: AsyncSession) -> list[SensorReading]:
-    """Retorna la lectura más reciente de cada sensor activo."""
+async def get_latest_readings(
+    db: AsyncSession, max_age_hours: int = _MAX_AGE_HOURS
+) -> list[SensorReading]:
+    """Retorna la lectura más reciente de cada sensor activo, si es reciente
+    (dentro de `max_age_hours`). Antes no filtraba por `Sensor.active` ni por
+    antigüedad: una lectura de hace meses seguía alimentando el snapshot."""
+    cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
     subq = (
         select(SensorReading.sensor_id, func.max(SensorReading.timestamp).label("max_ts"))
+        .where(SensorReading.timestamp >= cutoff)
         .group_by(SensorReading.sensor_id)
         .subquery()
     )
@@ -42,6 +52,8 @@ async def get_latest_readings(db: AsyncSession) -> list[SensorReading]:
             (SensorReading.sensor_id == subq.c.sensor_id)
             & (SensorReading.timestamp == subq.c.max_ts),
         )
+        .join(Sensor, SensorReading.sensor_id == Sensor.id)
+        .where(Sensor.active.is_(True))
     )
     return list(result.scalars().all())
 

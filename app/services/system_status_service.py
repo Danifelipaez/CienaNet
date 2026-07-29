@@ -58,7 +58,7 @@ async def get_system_status(db: AsyncSession) -> dict:
         },
         {
             "id": "satelite",
-            "nombre": "NASA MODIS / Copernicus Marine",
+            "nombre": "NASA MUR / Sentinel-3 OLCI",
             "desc": "Temp. superficial, clorofila-a",
             "estado": _satellite_status(satellite_row.date if satellite_row else None),
             "actualizado": satellite_row.date.isoformat() if satellite_row else None,

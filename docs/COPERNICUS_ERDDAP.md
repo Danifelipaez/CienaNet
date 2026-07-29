@@ -15,7 +15,7 @@ abajo como candidatos:**
 | Fuente | Resolución nativa | Tamaño del píxel | vs. Ciénaga (~450 km²) |
 |---|---|---|---|
 | NASA MUR SST (`jplMURSST41`, ya en uso) | 0.01° | ~1 km × 1 km ≈ 1 km² | ✅ ~450 píxeles sobre la laguna |
-| NASA MODIS clorofila (`erdMH1chla8day`, ya en uso) | ~0.042° (4 km nativo) | ~4.6 km × 4.6 km ≈ 21 km² | ✅ ~21 píxeles, aceptable |
+| NASA MODIS clorofila (`erdMH1chla8day`, **reemplazado** por Sentinel-3 OLCI, ver [RESOLUCION_FUENTES.md](./RESOLUCION_FUENTES.md); sigue siendo el histórico 2003-presente para ML) | ~0.042° (4 km nativo) | ~4.6 km × 4.6 km ≈ 21 km² | ✅ ~21 píxeles, aceptable |
 | Open-Meteo (ECMWF IFS / GFS) | ~0.08°–0.11° | ~9–12 km × 9–12 km ≈ 85–150 km² | ⚠️ solo 3–5 píxeles; aceptable para viento/lluvia (variable regional), no para variables oceánicas puntuales |
 | **CMEMS BGC** (`GLOBAL_ANALYSISFORECAST_BGC_001_028` y `GLOBAL_MULTIYEAR_BGC_001_029`) | **0.25°** | **~27.8 km × 27.8 km ≈ 770 km²** | ❌ **el píxel es MÁS GRANDE que toda la Ciénaga** — mismo problema que el NMME de la captura |
 | CMEMS physics global (`GLOBAL_ANALYSISFORECAST_PHY_001_024`) | 1/12° (~0.083°) | ~9.2 km × 9.2 km ≈ 85 km² | ⚠️ borderline, ~5 píxeles sobre la laguna |

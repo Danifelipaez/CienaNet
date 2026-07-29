@@ -68,6 +68,7 @@ class WeatherSnapshot(Base):
     humidity_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     wind_speed_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
     wind_direction_deg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wind_gust_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
     precipitation_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -86,24 +87,11 @@ class SatelliteData(Base):
     date: Mapped[date] = mapped_column(Date)
     sst_celsius: Mapped[float | None] = mapped_column(Float, nullable=True)
     chlorophyll_mgm3: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # {"<zona>": {"sst_celsius": .., "chlorophyll_mgm3": ..}} — solo zonas con dato
+    # real ese día (ver ingestion/satellite.py). Puramente aditivo sobre las
+    # columnas escalares de arriba (media del box), que no cambian de significado.
+    por_zona: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-
-class ExternalAlert(Base):
-    """Alerta de una fuente externa (NOAA NHC, IDEAM)."""
-
-    __tablename__ = "external_alerts"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
-    )
-    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    alert_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 

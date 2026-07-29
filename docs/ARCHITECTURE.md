@@ -11,7 +11,7 @@
                                                         ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        FASTAPI BACKEND                               │
-│      (servidor universitario — principal · Vercel — respaldo)        │
+│                     (servidor universitario)                         │
 │                                                                      │
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────────────────┐  │
 │  │ /webhook  │ │ /sensors  │ │ /admin    │ │ /dashboard, /data  │  │
@@ -21,10 +21,13 @@
 │  ┌─────▼─────────────▼─────────────▼─────────────────▼───────────┐ │
 │  │                       Capa de Servicios                        │ │
 │  │  message_router · whatsapp_service · sensor_service ·          │ │
-│  │  alert_service · ai_service · dashboard_service ·               │ │
+│  │  alert_service · ai_service · dashboard_service (ESCRITURA:     │ │
+│  │  llama APIs externas + persiste) · snapshot_service (LECTURA:   │ │
+│  │  lee lo ya persistido, cero red — usado por el bot y el mapa) · │ │
 │  │  points_service · sedimentation_service · system_status_service │ │
-│  │  · semaphore · ipp · derived · ingestion/{weather,satellite,    │ │
-│  │  alerts_ext}                                                    │ │
+│  │  · semaphore · ipp · derived · trends (tendencias 24h/7d) ·     │ │
+│  │  signals (anoxia, pulso de agua dulce — estimaciones) ·         │ │
+│  │  ingestion/{weather,satellite,alerts_ext,ideam_hidro}           │ │
 │  └──────────────────────────┬───────────────────────────────────--┘ │
 └─────────────────────────────┼────────────────────────────────------┘
                               │
@@ -60,23 +63,23 @@
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                  DASHBOARD (Next.js — App Router)                    │
-│         Deploy separado — servidor universitario + Vercel            │
+│    Repo separado (CienaRed-Frontend) — deploy en Vercel              │
 │                                                                      │
-│  frontend/app/dashboard/                                            │
+│  app/dashboard/                                                      │
 │    ├── mapa/       → mapa-view.tsx (Leaflet, fishing_points/IPP)     │
 │    ├── graficas/   → graficas-view.tsx (histórico ambiental)         │
 │    ├── ia/         → ia-view.tsx (chat con Gemini vía /dashboard/ai) │
 │    └── sistema/    → estado de fuentes de datos (system-status)      │
 │                                                                      │
-│  frontend/app/api/{admin,data}/*  → route handlers Next.js que      │
-│  proxean al backend FastAPI (evitan exponer ADMIN_API_KEY al cliente)│
+│  app/api/{admin,data}/*  → route handlers Next.js que proxean al    │
+│  backend FastAPI (BACKEND_URL) — evitan exponer ADMIN_API_KEY al     │
+│  cliente                                                             │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        CI/CD PIPELINE                                │
 │                                                                      │
-│  GitHub (main branch) ──► Vercel Auto Deploy ──► Respaldo/staging   │
-│  GitHub (dev branch)  ──► Vercel Preview ──► Preview                │
+│  GitHub (CienaRed-Frontend, main) ──► Vercel Auto Deploy ──► Prod    │
 │  Servidor universitario ──► deploy manual (ver docs/DEPLOYMENT.md)  │
 │                             ──► Producción                           │
 └─────────────────────────────────────────────────────────────────────┘
@@ -89,9 +92,16 @@
 2. Meta → POST /webhook/whatsapp con payload JSON
 3. FastAPI valida firma HMAC (X-Hub-Signature-256)
 4. MessageRouter identifica tipo: texto / audio / imagen / botón
-5. Se procesa intención (NLU básico o proveedor de IA via AIProvider)
-6. Se consulta DB para historial y datos de sensores recientes
-7. Se construye respuesta (texto + botones interactivos si aplica)
+5. Se procesa intención por palabra clave: saludo, condición del agua,
+   dónde pesco, alertas on/off, reporte de captura — o cae a AIProvider
+   (Gemini) para texto libre
+6. Para condición/dónde-pesco: snapshot_service.read_persisted() lee el
+   último estado YA persistido (cero llamadas a APIs externas, cero
+   escrituras) — lo refresca el scheduler horario, no el mensaje del
+   pescador. dashboard_service.get_latest_snapshot() (el camino que SÍ
+   llama APIs externas y persiste) solo lo usan el scheduler y
+   GET /data/latest, nunca el bot
+7. Se construye respuesta corta (3-4 oraciones, sin jerga)
 8. FastAPI → Meta API → WhatsApp → pescador
 9. Se guarda conversación en Supabase
 ```
@@ -109,40 +119,25 @@
 
 ## Despliegues disponibles
 
-Dos destinos, misma base de código y misma Supabase — ver
-[DEPLOYMENT.md](./DEPLOYMENT.md) para el cómo. `RUN_SCHEDULER` es la única
-variable que difiere entre ambos (controla quién corre el loop horario de
-refresco/alertas).
+Backend y frontend viven en repos separados y se despliegan cada uno en un
+único destino — ver [DEPLOYMENT.md](./DEPLOYMENT.md) para el cómo.
 
-**Servidor universitario (principal / producción):**
+**Backend — servidor universitario (único destino, producción):**
 - Proceso persistente (Docker o systemd+uvicorn) — sin límite de timeout por
   función, soporta WebSockets si algún día hacen falta
 - Recibe el webhook real de Meta y las lecturas de los sensores ESP32
-- `RUN_SCHEDULER=true` — dueño del loop horario de refresco y alertas
+- `RUN_SCHEDULER=true` en prod (dueño del loop horario de refresco y
+  alertas), `false` por defecto en local dev
 
-**Vercel (respaldo / staging):**
-- Serverless, `api/index.py` (handler Mangum) + `vercel.json`
-- Timeout máximo: 60s (plan Pro) / 10s (Hobby) — mantener handlers rápidos
-- No hay WebSockets en serverless functions
-- Cada endpoint de FastAPI se mapea como función serverless separada
-- `RUN_SCHEDULER` ausente → default `false`: nunca corre el loop ni envía
-  alertas: solo su cron diario existente (`vercel.json`), que refresca el
-  snapshot sin enviar alertas
-
-**Estructura de archivos para Vercel:**
-```
-api/
-  index.py          ← entry point FastAPI (handler Mangum)
-vercel.json         ← config de rutas
-requirements.txt    ← dependencias Python
-```
+**Frontend — Vercel (único destino), repo separado `CienaRed-Frontend`:**
+- Next.js App Router, deploy automático desde ese repo
+- `BACKEND_URL` apunta a la URL pública HTTPS del backend (`https://api.<dominio>`)
 
 **Estructura de archivos para el servidor universitario:**
 ```
 Dockerfile            ← backend
-frontend/Dockerfile   ← dashboard
-docker-compose.yml    ← orquesta ambos + Caddy (TLS automático)
-Caddyfile             ← reverse proxy, api.<dominio> / dashboard.<dominio>
+docker-compose.yml    ← orquesta backend + Caddy (TLS automático)
+Caddyfile             ← reverse proxy, api.<dominio>
 ```
 
 ## Base de Datos — Esquema Principal
@@ -174,15 +169,21 @@ sensor_readings (id uuid PK, sensor_id uuid FK→sensors, timestamp timestamptz,
                  ph float, conductivity_mscm float, temperature_c float,
                  water_level_cm float, created_at timestamptz)
 
--- Snapshots meteorológicos (Open-Meteo)
+-- Snapshots meteorológicos (Open-Meteo) — estacion/humidity_pct: migración 010;
+-- wind_gust_kmh (ráfaga real, wind_gusts_10m): migración 011
 weather_snapshots (id uuid PK, source varchar DEFAULT 'open-meteo',
-                   timestamp timestamptz, temperature_c float,
+                   estacion varchar DEFAULT 'CGSM', timestamp timestamptz,
+                   temperature_c float, humidity_pct float,
                    wind_speed_kmh float, wind_direction_deg float,
-                   precipitation_mm float, created_at timestamptz)
+                   wind_gust_kmh float, precipitation_mm float, created_at timestamptz)
 
 -- Datos satelitales diarios (NASA ERDDAP / NOAA CoastWatch, ver RESOLUCION_FUENTES.md)
+-- por_zona: migración 012 — desglose por las 6 zonas IPP, aditivo sobre las
+-- columnas escalares (media del box). sst_celsius/chlorophyll_mgm3 quedan NULL
+-- si la fuente cayó a baseline — nunca se persiste un baseline como medición.
 satellite_data (id uuid PK, source varchar, date date,
-                sst_celsius float, chlorophyll_mgm3 float, created_at timestamptz)
+                sst_celsius float, chlorophyll_mgm3 float, por_zona jsonb,
+                created_at timestamptz)
 
 -- Alertas de fuentes externas (NOAA NHC, IDEAM)
 external_alerts (id uuid PK, source varchar, alert_type varchar,
@@ -216,5 +217,5 @@ ai_conversation (id uuid PK, ...)
 - Webhook Meta: validación HMAC-SHA256 obligatoria
 - Sensores IoT: API key por dispositivo (hashed en DB)
 - Variables sensibles: solo en variables de entorno, nunca en código
-- HTTPS: forzado por Vercel
+- HTTPS: forzado por Caddy (backend) y Vercel (frontend, repo separado)
 - Rate limiting: en endpoints de ingesta de sensores

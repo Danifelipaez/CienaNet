@@ -1,4 +1,5 @@
 .env
+firmware/**/config.h
 .venv/
 venv/
 __pycache__/

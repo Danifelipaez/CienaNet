@@ -1,49 +1,63 @@
 """Tests del respaldo en DB de datos IDEAM y del contexto de IA."""
 
 import asyncio
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
-from app.services.dashboard_service import _save_ideam_hidro, build_ai_context
+from app.services.dashboard_service import _save_ideam_hidro, _save_satellite, build_ai_context
 
 
-def _result(scalar):
-    r = MagicMock()
-    r.scalar_one_or_none.return_value = scalar
-    return r
-
-
-def test_save_ideam_hidro_inserta_solo_filas_nuevas():
-    """Fila ya existente (mismo variable+estacion+date) se salta; la nueva se inserta."""
+def test_save_ideam_hidro_hace_un_solo_insert_con_todas_las_filas():
+    """Un único INSERT ON CONFLICT DO NOTHING (dedup vía unique constraint en DB) —
+    no SELECT-then-INSERT fila por fila, que sería una race bajo refrescos concurrentes."""
     db = AsyncMock()
-    db.execute = AsyncMock(side_effect=[_result(None), _result(MagicMock())])
-    db.add = MagicMock()
 
     precipitacion = [
         {"date": "2026-07-01", "estacion": "Media Luna", "precipitacion_mm": 3.5},
         {"date": "2026-07-01", "estacion": "La Gran Via", "precipitacion_mm": 0.0},
     ]
-
-    asyncio.run(_save_ideam_hidro(db, precipitacion, []))
-
-    assert db.add.call_count == 1
-    added = db.add.call_args.args[0]
-    assert added.estacion == "Media Luna"
-    assert added.valor == 3.5
-    assert added.variable == "precipitacion_mm"
-    db.commit.assert_awaited_once()
-
-
-def test_save_ideam_hidro_no_inserta_si_todo_ya_existe():
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=_result(MagicMock()))
-    db.add = MagicMock()
-
     nivel = [{"date": "2026-07-01", "estacion": "Puerto Rico Hacienda", "nivel_m": 1.79}]
 
-    asyncio.run(_save_ideam_hidro(db, [], nivel))
+    asyncio.run(_save_ideam_hidro(db, precipitacion, nivel))
 
-    db.add.assert_not_called()
+    db.execute.assert_awaited_once()  # una sola query para las 3 filas
+    stmt = db.execute.call_args.args[0]
+    rows = stmt.compile().params
+    assert len(precipitacion) + len(nivel) == 3
+    assert rows  # el statement lleva las filas embebidas como VALUES
     db.commit.assert_awaited_once()
+
+
+def test_save_satellite_no_persiste_baseline_como_medicion():
+    """Si el origen de un campo es 'baseline' (API caída o valor fuera de rango),
+    se guarda NULL — nunca el valor de respaldo, que quedaría indistinguible de
+    una medición real para siempre."""
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None  # sin fila previa ese día
+    db.execute.return_value = result
+    db.add = MagicMock()
+
+    data = {
+        "sst_celsius": 28.0,
+        "chlorophyll_mgm3": 12.0,
+        "date": "2026-07-01",
+        "origen": {"sst_celsius": "baseline", "chlorophyll_mgm3": "medido"},
+    }
+    asyncio.run(_save_satellite(db, data, date(2026, 7, 1)))
+
+    added = db.add.call_args.args[0]
+    assert added.sst_celsius is None
+    assert added.chlorophyll_mgm3 == 12.0
+
+
+def test_save_ideam_hidro_no_ejecuta_nada_si_no_hay_filas():
+    db = AsyncMock()
+
+    asyncio.run(_save_ideam_hidro(db, [], []))
+
+    db.execute.assert_not_awaited()
+    db.commit.assert_not_awaited()
 
 
 _BASE_SNAPSHOT = {
@@ -60,6 +74,17 @@ def test_build_ai_context_incluye_cgsm_sin_tasajera_ni_ideam():
     assert "humedad 70.0%" in texto
     assert "Tasajera" not in texto
     assert "IDEAM" not in texto
+
+
+def test_build_ai_context_nombra_las_fuentes_reales():
+    # "Copernicus Marine"/"NASA MODIS" eran falsos: la clorofila viene de
+    # Sentinel-3 OLCI vía NOAA CoastWatch y la SST de NASA MUR (jplMURSST41),
+    # ver app/services/ingestion/satellite.py.
+    texto = build_ai_context(_BASE_SNAPSHOT)
+    assert "OLCI" in texto
+    assert "MUR" in texto
+    assert "MODIS" not in texto
+    assert "Copernicus Marine" not in texto
 
 
 def test_build_ai_context_incluye_tasajera_y_ultima_lectura_ideam_por_estacion():
