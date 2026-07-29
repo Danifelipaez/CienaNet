@@ -143,7 +143,7 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     # Solo dashboard por ahora: los umbrales de anoxia no están validados contra un
     # evento real todavía, y el riesgo de un falso positivo (día de pesca perdido,
     # credibilidad quemada) es asimétrico frente al de un falso negativo. El bot
-    # tiene el mecanismo listo (message_router._ANOXIA_EN_BOT) pero apagado.
+    # tiene el mecanismo listo (condicion_message._ANOXIA_EN_BOT) pero apagado.
     senales = {
         "anoxia": anoxia_risk(satellite_data, weather_data, water),
         "pulso_agua_dulce": pulso_agua_dulce(

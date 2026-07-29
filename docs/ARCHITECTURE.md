@@ -85,6 +85,12 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+> Nota: `dashboard_service.py` y `message_router.py` son los nombres
+> conceptuales de la capa de servicios de arriba; por la regla de 300 líneas
+> cada uno se partió en módulos internos (`dashboard_persistence.py`,
+> `dashboard_history.py`, `ai_context.py`; `condicion_message.py`) — ver el
+> árbol de carpetas real en [KNOWLEDGE_BASE.md](./KNOWLEDGE_BASE.md) §2.
+
 ## Flujo WhatsApp (entrada de mensaje)
 
 ```
@@ -119,8 +125,10 @@
 
 ## Despliegues disponibles
 
-Backend y frontend viven en repos separados y se despliegan cada uno en un
-único destino — ver [DEPLOYMENT.md](./DEPLOYMENT.md) para el cómo.
+Backend y frontend viven en repos separados y **deberían** desplegarse cada
+uno en un único destino — ver [DEPLOYMENT.md](./DEPLOYMENT.md) para el cómo,
+incluida la deuda conocida de que el backend todavía tiene un segundo
+deployment vivo en Vercel.
 
 **Backend — servidor universitario (único destino, producción):**
 - Proceso persistente (Docker o systemd+uvicorn) — sin límite de timeout por

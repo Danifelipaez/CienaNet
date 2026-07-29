@@ -142,7 +142,7 @@ async def _fetch_chlorophyll(start_str: str) -> dict:
 async def get_sst() -> dict:
     """Retorna {"box", "origen", "por_zona"} — origen es "medido" o "baseline"
     (API caída o valor fuera de rango). El baseline nunca se persiste como si
-    fuera medición real, ver dashboard_service._save_satellite."""
+    fuera medición real, ver dashboard_persistence._save_satellite."""
     date_str = (date.today() - timedelta(days=2)).isoformat()
     try:
         return await asyncio.to_thread(_fetch_sst, date_str)

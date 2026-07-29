@@ -1,7 +1,7 @@
 # Base de Conocimiento — CienaNet Bot
 
 > Documento de referencia rápida para el equipo de desarrollo.  
-> Última actualización: 2026-07-28
+> Última actualización: 2026-07-29
 
 ---
 
@@ -39,9 +39,13 @@ app/
 │   ├── sensor_service.py
 │   ├── alert_service.py
 │   ├── ai_service.py
-│   ├── message_router.py     # enruta intención del pescador (bot WhatsApp)
-│   ├── dashboard_service.py  # get_latest_snapshot() — camino de ESCRITURA (llama APIs + persiste)
-│   ├── snapshot_service.py   # read_persisted() — camino de LECTURA (cero red, lee lo ya persistido)
+│   ├── message_router.py       # enruta intención del pescador (bot WhatsApp)
+│   ├── condicion_message.py    # arma el texto de "condición del agua" (extraído de message_router.py, regla de 300 líneas)
+│   ├── dashboard_service.py    # get_latest_snapshot() — orquesta el camino de ESCRITURA (llama APIs + persiste)
+│   ├── dashboard_persistence.py # _save_weather/_save_satellite/_save_ideam_hidro/_upsert_semaphore (extraído de dashboard_service.py)
+│   ├── dashboard_history.py    # get_history() — serie de tiempo para GET /data/history (extraído de dashboard_service.py)
+│   ├── ai_context.py           # build_ai_context(), pista de luna para camarón (extraído de dashboard_service.py)
+│   ├── snapshot_service.py     # read_persisted() — camino de LECTURA (cero red, lee lo ya persistido)
 │   ├── points_service.py, sedimentation_service.py, system_status_service.py
 │   ├── semaphore.py, ipp.py, derived.py
 │   ├── trends.py   # tendencias 24h/7d desde lo persistido (delta, dirección, lluvia 72h)
@@ -545,7 +549,12 @@ COPERNICUSMARINE_SERVICE_PASSWORD=
 # App
 ENVIRONMENT=development
 SENSOR_API_KEY_SECRET=        # Salt para hashear API keys ESP32
-ADMIN_API_KEY=change-me       # Protege /admin/* (registro de sensores) y los proxies del dashboard
+ADMIN_API_KEY=change-me       # Protege /admin/* (registro de sensores) y los proxies del dashboard.
+                              # Fuera de development, dejarlo en "change-me"/vacío hace que
+                              # Settings() falle al arrancar (fail-fast, ver config.py).
+CORS_ALLOWED_ORIGINS=         # Orígenes de navegador con permiso CORS, separados por coma.
+                              # Vacío por defecto — el frontend habla server-to-server vía
+                              # BACKEND_URL, nunca desde el navegador (ver ARCHITECTURE.md).
 
 # Coordenadas (defaults en config.py, no secretos — centroide real, ver §12)
 CIENAGA_LAT=10.859056

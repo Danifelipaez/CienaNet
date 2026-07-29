@@ -11,11 +11,18 @@
 - Curva de aprendizaje baja para el equipo (Valentina ya conoce Python)
 
 ### Plataforma backend: servidor universitario
-Proceso persistente (Docker o systemd+uvicorn) — único destino de
+Proceso persistente (Docker o systemd+uvicorn) — destino previsto de
 producción, recibe el webhook de Meta y corre el scheduler. Vercel se usó en
-su momento como respaldo/staging serverless (Mangum) pero se dejó de usar
-para el backend: sin límite de timeout por función y con soporte real de
-procesos de larga duración no hacía falta. Ver [DEPLOYMENT.md](./DEPLOYMENT.md).
+su momento como respaldo/staging serverless (Mangum) y la decisión fue
+dejar de usarlo para el backend: sin límite de timeout por función y con
+soporte real de procesos de larga duración no hacía falta.
+
+**Deuda conocida:** esa decisión no se completó operativamente — `api/index.py`
+y `vercel.json` (el entry point Mangum) se borraron del repo, pero el
+proyecto Vercel del backend (`ciena-net`) nunca se desvinculó, así que sigue
+haciendo auto-deploy en cada push y sirviendo tráfico real en paralelo.
+Detalle y riesgo en [DEPLOYMENT.md](./DEPLOYMENT.md) ("Deuda: doble
+despliegue").
 
 ### Base de Datos: Supabase (PostgreSQL)
 **Por qué Supabase:**
@@ -46,12 +53,21 @@ Dashboard científico, **repo separado** (`CienaRed-Frontend`), deploy Vercel:
 ### CI/CD: GitHub Actions + Vercel + deploy manual (universidad)
 ```
 Backend:
-  PR abierto → Tests en GitHub Actions
+  PR abierto → ruff check . + pytest en GitHub Actions (instala desde
+               requirements-lock.txt, versiones exactas via pip freeze)
   Servidor universitario → deploy manual (git pull + docker compose up -d --build), ver DEPLOYMENT.md
 
 Frontend (repo CienaRed-Frontend):
   Push a main → Vercel auto-deploy (producción)
 ```
+Dependabot (`.github/dependabot.yml`) abre PRs semanales para dependencias
+pip y GitHub Actions — `requirements.txt` sigue siendo la fuente editable
+(floors humanos), `requirements-lock.txt` es lo que CI y el servidor
+universitario instalan.
+
+**Lint:** `ruff check .`, config en `ruff.toml` (no `pyproject.toml` —
+Vercel auto-detecta ese archivo e intenta resolver con `uv lock`, que falla
+sin una tabla `[project]`). Reglas: `E4, E7, E9, F`.
 
 ### IoT: Arduino + ESP32
 - **Microcontrolador:** ESP32 (WiFi + BLE integrado, bajo costo ~$5)
@@ -87,9 +103,13 @@ alembic             >= 1.13
 supabase            >= 2.9
 httpx               >= 0.27   # cliente HTTP async para Meta API
 python-dotenv       >= 1.0
+erddapy             >= 0.8    # NASA/NOAA ERDDAP (SST)
+feedparser          >= 6.0    # RSS NOAA NHC (alertas de ciclones)
+gsw                 >= 3.6    # cálculos oceanográficos (salinidad, etc.)
 # IA: sin SDK — Gemini se llama por REST directo (httpx) desde ai_service.py
 pytest              >= 8.0
 pytest-asyncio      >= 0.24
+ruff                >= 0.16   # lint gate en CI, ver ruff.toml
 ```
 
 ## Variables de Entorno Requeridas
@@ -118,7 +138,12 @@ AI_HISTORY_TURNS=10
 # App
 ENVIRONMENT=              # development | staging | production
 SENSOR_API_KEY_SECRET=    # Salt para hashear API keys de sensores
+ADMIN_API_KEY=            # Protege /admin/* y proxies del dashboard. Fuera de
+                          # development, dejarlo en "change-me"/vacío falla al
+                          # arrancar (fail-fast, ver config.py)
 RUN_SCHEDULER=            # true SOLO en el deployment dueño del scheduler (ver DEPLOYMENT.md)
+CORS_ALLOWED_ORIGINS=     # Orígenes de navegador permitidos, separados por coma.
+                          # Vacío por defecto (server-to-server, sin navegador de por medio)
 ```
 
 ## Lo que NO usamos y por qué
@@ -129,5 +154,5 @@ RUN_SCHEDULER=            # true SOLO en el deployment dueño del scheduler (ver
 | Twilio WhatsApp | Costo adicional por mensaje; somos estudiantes |
 | Firebase | Vendor lock-in, pricing impredecible |
 | MongoDB | SQL es mejor para datos de series temporales de sensores |
-| Vercel serverless para el backend | Se usó como respaldo/staging al inicio; el servidor universitario cubre producción como proceso persistente, sin límites de timeout ni necesidad de Mangum |
+| Vercel serverless para el backend | Se usó como respaldo/staging al inicio; el servidor universitario cubre producción como proceso persistente, sin límites de timeout ni necesidad de Mangum. **El proyecto Vercel sigue linkeado y deployando en la práctica** — ver deuda conocida arriba y en DEPLOYMENT.md |
 | Django | Demasiado framework para una API; FastAPI es suficiente |

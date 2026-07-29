@@ -12,6 +12,43 @@ Ambos apuntan a la **misma base de datos Supabase**. El frontend habla con el
 backend server-to-server vía `BACKEND_URL` (ver `lib/api.ts` en el repo del
 frontend) — nunca hay fetches al backend desde el navegador.
 
+## Deuda: doble despliegue del backend (Vercel sigue vivo)
+
+**Confirmado 2026-07-29:** aunque la tabla de arriba dice que el backend
+tiene un único destino, el proyecto Vercel de este mismo repo (`ciena-net`,
+linkeado vía `.vercel/repo.json`, gitignored) nunca se desvinculó. Cada push
+a `main` sigue disparando un build+deploy real, y `ciena-net.vercel.app`
+sirve tráfico en producción en paralelo al servidor universitario — no es un
+artefacto muerto, se verificó con `vercel logs` y pegándole a los endpoints
+reales (`/api/v1/data/latest`, `/api/v1/dashboard/points`, etc. — todos 200).
+
+`api/index.py` y `vercel.json` (el entry point Mangum) se borraron hace
+tiempo del repo (ver STACK.md), pero Vercel sigue sirviendo el ASGI app de
+todos modos vía detección propia — no depende de esos archivos como se
+pensaba.
+
+Dos riesgos concretos de dejarlo así:
+1. **Preview deployments crashean con 500 en cada request.** Cualquier
+   branch que no sea `main` (p.ej. `Developing`) hace deploy en el entorno
+   "Preview" de Vercel, y las variables de entorno de Supabase/Postgres
+   (`POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING`, `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`) solo están configuradas para el entorno
+   "Production" en el dashboard de Vercel. `Settings()` revienta al importar
+   `app/main.py` (`ValidationError`, 4 campos faltantes) y **todas** las
+   requests devuelven 500, incluso `/favicon.ico`.
+2. **Posible duplicación del scheduler.** Si el proyecto Vercel tiene
+   `RUN_SCHEDULER=true` configurado (no verificado desde aquí — requiere
+   revisar el dashboard de Vercel), habría dos procesos evaluando alertas y
+   mandando WhatsApp a los mismos pescadores. El advisory lock de
+   `maybe_send_alert` protege contra llamadas concurrentes, pero no contra
+   dos deployments corriendo el loop horario de forma independiente.
+
+**Acción recomendada:** decidir explícitamente entre (a) desvincular/borrar
+el proyecto Vercel del backend ya que el servidor universitario es el
+destino real, o (b) si se quiere mantener como respaldo caliente, completar
+las variables de entorno también en el scope "Preview" y confirmar
+`RUN_SCHEDULER=false` ahí. Ninguna de las dos requiere cambios de código.
+
 ## `RUN_SCHEDULER`
 
 `app/main.py` tiene un loop en background (`_hourly_refresh`) que refresca el
