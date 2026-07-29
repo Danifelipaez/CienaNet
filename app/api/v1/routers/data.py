@@ -11,7 +11,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.environmental import DailySemaphore, ExternalAlert
+from app.models.environmental import DailySemaphore
 from app.schemas.environmental import DashboardSnapshot, HistoryResponse
 from app.services.dashboard_service import get_history, get_latest_snapshot
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
@@ -51,14 +51,8 @@ async def zones_ipp(db: AsyncSession = Depends(get_db)) -> dict:
 
 @router.get("/alerts")
 async def active_alerts(db: AsyncSession = Depends(get_db)) -> dict:
-    """Alertas activas: ciclones NOAA + alertas externas guardadas en DB."""
+    """Alertas activas: ciclones NOAA + color del semáforo actual."""
     cyclones = await get_cyclone_alerts()
-
-    db_alerts = (
-        await db.execute(
-            select(ExternalAlert).order_by(desc(ExternalAlert.fetched_at)).limit(20)
-        )
-    ).scalars().all()
 
     semaphore = (
         await db.execute(
@@ -68,14 +62,5 @@ async def active_alerts(db: AsyncSession = Depends(get_db)) -> dict:
 
     return {
         "cyclones": cyclones,
-        "external": [
-            {
-                "source": a.source,
-                "type": a.alert_type,
-                "title": a.title,
-                "fetched_at": a.fetched_at.isoformat(),
-            }
-            for a in db_alerts
-        ],
         "semaphore_color": semaphore.color if semaphore else None,
     }
