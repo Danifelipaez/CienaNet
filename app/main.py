@@ -16,10 +16,7 @@ logger = logging.getLogger(__name__)
 
 async def _hourly_refresh() -> None:
     # ponytail: loop solo tiene sentido en un proceso persistente (uvicorn
-    # local o el servidor universitario, ver settings.run_scheduler). En
-    # Vercel serverless este loop nunca se agenda; en su lugar Vercel Cron
-    # pega a GET /data/latest (solo refresca snapshot, nunca envía alertas
-    # — ver vercel.json y docs/DEPLOYMENT.md).
+    # local o el servidor universitario, ver settings.run_scheduler).
     from app.services.alert_service import maybe_send_alert
     from app.services.dashboard_service import get_latest_snapshot
 
@@ -41,7 +38,10 @@ async def lifespan(app: FastAPI):
     # contra duplicados si dos instancias lo activaran al mismo tiempo, pero
     # este gate evita de entrada llamadas redundantes a APIs externas.
     if settings.run_scheduler:
-        asyncio.create_task(_hourly_refresh())
+        # Referencia fuerte obligatoria: el event loop solo retiene una referencia
+        # débil a la task, así que sin guardarla el GC puede recolectarla y el
+        # scheduler se detiene en silencio (sin log, sin error).
+        app.state.refresh_task = asyncio.create_task(_hourly_refresh())
     yield
 
 
