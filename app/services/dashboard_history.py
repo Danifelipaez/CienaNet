@@ -54,23 +54,20 @@ async def get_history(db: AsyncSession, days: int) -> dict:
         )
     ).all()
 
-    # Promedio por hora entre sensores activos — igual que aggregate_sensor_readings()
-    # del snapshot, para no mezclar en la misma serie lecturas de boyas distintas.
-    water_hour = func.date_trunc("hour", SensorReading.timestamp)
+    # Lecturas crudas de sensores activos, igual que weather_rows — sin agregar por
+    # hora, para no aplastar la resolución real de muestreo (p.ej. cada minuto en
+    # debugging). El adapter del frontend ya agrega por día/semana en vista "Día"/"7 días".
+    # ponytail: si algún día hay varias boyas activas a la vez, sus lecturas crudas se
+    # mezclan en una sola serie (igual que el promedio del snapshot). Separar por sensor/
+    # zona, como weatherMultiSeries por estación, si eso llega a confundir la gráfica.
     water_rows = (
         await db.execute(
-            select(
-                water_hour.label("hour"),
-                func.avg(SensorReading.ph).label("ph"),
-                func.avg(SensorReading.temperature_c).label("temperature_c"),
-                func.avg(SensorReading.conductivity_mscm).label("conductivity_mscm"),
-            )
+            select(SensorReading)
             .join(Sensor, SensorReading.sensor_id == Sensor.id)
             .where(SensorReading.timestamp >= cutoff, Sensor.active.is_(True))
-            .group_by(water_hour)
-            .order_by(water_hour)
+            .order_by(SensorReading.timestamp)
         )
-    ).all()
+    ).scalars().all()
 
     ideam_precipitacion, ideam_nivel_rio = await ideam_task
 
@@ -79,10 +76,10 @@ async def get_history(db: AsyncSession, days: int) -> dict:
         "ideam_nivel_rio": ideam_nivel_rio,
         "water": [
             {
-                "timestamp": r.hour.isoformat(),
-                "ph": round(r.ph, 2) if r.ph is not None else None,
-                "temperature_c": round(r.temperature_c, 2) if r.temperature_c is not None else None,
-                "conductivity_mscm": round(r.conductivity_mscm, 2) if r.conductivity_mscm is not None else None,
+                "timestamp": r.timestamp.isoformat(),
+                "ph": r.ph,
+                "temperature_c": r.temperature_c,
+                "conductivity_mscm": r.conductivity_mscm,
             }
             for r in water_rows
         ],
