@@ -5,7 +5,6 @@ La API key raw se muestra UNA sola vez al registrar — no se puede recuperar de
 """
 
 import secrets
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel

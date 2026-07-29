@@ -49,8 +49,9 @@ app = FastAPI(title="CienaNet Bot", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    # ponytail: abierto para el MVP; restringir al dominio del dashboard antes de prod
-    allow_origins=["*"],
+    # Vacío por defecto — ver settings.cors_allowed_origins. Ningún fetch de
+    # navegador es legítimo hoy (server-to-server vía BACKEND_URL).
+    allow_origins=[o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )

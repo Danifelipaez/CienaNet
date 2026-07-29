@@ -1,6 +1,6 @@
 """Pydantic schemas para respuestas del dashboard (KNOWLEDGE_BASE §8)."""
 
-from datetime import date, datetime
+from datetime import date
 
 from pydantic import BaseModel
 

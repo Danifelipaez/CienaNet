@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.environmental import DailySemaphore
 from app.schemas.environmental import DashboardSnapshot, HistoryResponse
-from app.services.dashboard_service import get_history, get_latest_snapshot
+from app.services.dashboard_history import get_history
+from app.services.dashboard_service import get_latest_snapshot
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
 
 router = APIRouter(prefix="/data", tags=["dashboard"])
