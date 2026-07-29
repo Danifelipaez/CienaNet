@@ -1,6 +1,7 @@
 """Tests de app/api/v1/routers/sensors.py — POST /sensors/ingest tras X-Api-Key."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,7 +14,10 @@ from app.models.environmental import Sensor
 
 VALID_READING = {
     "sensor_id": "esp32-01",
-    "timestamp": "2026-07-29T12:00:00+00:00",
+    # dinámico: con la validación de frescura de timestamp, un literal fijo
+    # se vuelve una bomba de tiempo en cuanto el reloj real se aleje de esa
+    # fecha (ver app/schemas/sensor.py::timestamp_within_freshness_window).
+    "timestamp": datetime.now(UTC).isoformat(),
     "ph": 7.6,
     "temperature_c": 28.0,
 }
@@ -73,3 +77,52 @@ def test_ingest_ok_persiste_y_actualiza_last_seen(client, mock_db):
     assert resp.json() == {"status": "ok"}
     mock_db.add.assert_called_once()
     assert sensor.last_seen is not None
+
+
+def test_ingest_timestamp_muy_viejo_rechaza(client):
+    sensor = Sensor(id=uuid.uuid4(), device_id="esp32-01", api_key_hash="x", active=True)
+    app.dependency_overrides[get_current_sensor] = lambda: sensor
+    stale_ts = (datetime.now(UTC) - timedelta(hours=8)).isoformat()
+    resp = client.post(
+        "/api/v1/sensors/ingest",
+        json={**VALID_READING, "timestamp": stale_ts},
+        headers={"X-Api-Key": "valida"},
+    )
+    assert resp.status_code == 422
+
+
+def test_ingest_timestamp_futuro_rechaza(client):
+    sensor = Sensor(id=uuid.uuid4(), device_id="esp32-01", api_key_hash="x", active=True)
+    app.dependency_overrides[get_current_sensor] = lambda: sensor
+    future_ts = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    resp = client.post(
+        "/api/v1/sensors/ingest",
+        json={**VALID_READING, "timestamp": future_ts},
+        headers={"X-Api-Key": "valida"},
+    )
+    assert resp.status_code == 422
+
+
+def test_ingest_timestamp_reintento_legitimo_acepta(client, mock_db):
+    # simula el buffer RTC del firmware reenviando una lectura de hace ~1h
+    # (peor caso real: TX_INTERVAL 15min x RTC_BUFFER_SIZE 4)
+    sensor = Sensor(id=uuid.uuid4(), device_id="esp32-01", api_key_hash="x", active=True)
+    app.dependency_overrides[get_current_sensor] = lambda: sensor
+    retry_ts = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    resp = client.post(
+        "/api/v1/sensors/ingest",
+        json={**VALID_READING, "timestamp": retry_ts},
+        headers={"X-Api-Key": "valida"},
+    )
+    assert resp.status_code == 201
+
+
+def test_ingest_sensor_id_no_coincide_rechaza(client):
+    sensor = Sensor(id=uuid.uuid4(), device_id="esp32-01", api_key_hash="x", active=True)
+    app.dependency_overrides[get_current_sensor] = lambda: sensor
+    resp = client.post(
+        "/api/v1/sensors/ingest",
+        json={**VALID_READING, "sensor_id": "esp32-99"},
+        headers={"X-Api-Key": "valida"},
+    )
+    assert resp.status_code == 422
