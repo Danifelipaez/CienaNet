@@ -86,7 +86,7 @@ Antes, si ERDDAP fallaba o el valor caía fuera de rango, se persistía el
 baseline histórico (28.0°C / 4.5 mg/m³) en `satellite_data` exactamente igual
 que un valor medido — sin forma de distinguir después cuál fue cuál.
 `get_sst()`/`get_chlorophyll()` ahora retornan `{"box", "origen", "por_zona"}`
-con `origen` en `"medido" | "baseline"`; `dashboard_service._save_satellite`
+con `origen` en `"medido" | "baseline"`; `dashboard_persistence._save_satellite`
 escribe `NULL` en la columna cuando el origen es `"baseline"` — ausencia real
 en vez de un número que parece medición. El mismo patrón (`"medido" | "cache"
 | "sin_dato"`) aplica a `weather.py` para Open-Meteo.

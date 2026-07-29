@@ -98,9 +98,15 @@ es código corriendo:
   Pesquero (IPP) por zona — calculados y cacheados diariamente.
 - Sistema de alertas por WhatsApp con lock de base de datos para evitar
   duplicados (`pg_advisory_xact_lock`).
-- Despliegue: backend solo en el servidor universitario (producción real);
-  frontend en repo separado (`CienaRed-Frontend`), deploy Vercel. Ambos
-  contra la misma Supabase.
+- Despliegue: backend pensado para el servidor universitario (producción
+  real) únicamente; frontend en repo separado (`CienaRed-Frontend`), deploy
+  Vercel. Ambos contra la misma Supabase.
+  **Deuda conocida (2026-07-29):** el proyecto Vercel `ciena-net` de este
+  mismo repo backend sigue linkeado (`.vercel/repo.json`, gitignored) y hace
+  auto-deploy en cada push — hoy sirve tráfico real en paralelo al servidor
+  universitario, no es solo un artefacto muerto. Ver "Deuda: doble
+  despliegue" en [`docs/DEPLOYMENT.md`](./DEPLOYMENT.md) antes de asumir que
+  el servidor universitario es el único backend corriendo.
 
 **Trabajo reciente / en curso** (commits más recientes en `Developing`):
 soporte para múltiples estaciones meteorológicas visibles en el mapa, una
@@ -153,7 +159,7 @@ documento.
   WhatsApp ya guarda `cantidad_indice` cuando el pescador la menciona, así
   que la serie de captura de `/data/history` empieza a tener datos.
 - Riesgo de anoxia (`signals.py`) implementado pero **apagado en el bot**
-  (`message_router._ANOXIA_EN_BOT = False`) — los 8 umbrales no están
+  (`condicion_message._ANOXIA_EN_BOT = False`) — los 8 umbrales no están
   validados contra un evento real todavía; visible solo en el dashboard.
 - 3 de las 6 zonas del IPP tienen coordenadas estimadas, no medidas (Boca de
   la Barra, Caño Clarín, Suroccidente) — pendiente de validar vía DG-05.
@@ -192,9 +198,11 @@ app/
 │   ├── routers/        # webhook.py, sensors.py, data.py, admin.py, dashboard.py
 │   └── dependencies.py # auth (API key sensores, admin), sesiones DB
 ├── services/            # TODA la lógica de negocio vive aquí
-│   ├── message_router.py, whatsapp_service.py, ai_service.py
+│   ├── message_router.py, condicion_message.py, whatsapp_service.py, ai_service.py
 │   ├── sensor_service.py, alert_service.py, semaphore.py, ipp.py
-│   ├── dashboard_service.py  # get_latest_snapshot() — camino de ESCRITURA
+│   ├── dashboard_service.py  # get_latest_snapshot() — orquesta el camino de ESCRITURA
+│   ├── dashboard_persistence.py, dashboard_history.py, ai_context.py
+│   │   # ↑ extraídos de dashboard_service.py (regla de 300 líneas, ver §13)
 │   ├── snapshot_service.py   # read_persisted() — camino de LECTURA (bot, mapa)
 │   ├── trends.py             # tendencias 24h/7d desde lo persistido
 │   ├── signals.py            # anoxia, pulso de agua dulce (estimaciones)
@@ -709,6 +717,10 @@ Checklist completa de revisión antes de commitear código generado por IA:
   probablemente está en el archivo equivocado — eso va en
   `dashboard_service.get_latest_snapshot()`, que solo llaman el scheduler y
   `GET /data/latest`.
+- **El texto de "condición del agua" vive en `condicion_message.py`**, no en
+  `message_router.py` — se extrajo para no pasar las 300 líneas. Si buscas
+  `_mensaje_condicion` o `_ANOXIA_EN_BOT` y no está en `message_router.py`,
+  es ahí.
 
 ---
 
@@ -752,16 +764,31 @@ referencia rápida más denso del repo).
 ## 12. Testing
 
 `tests/` — un archivo por servicio/router crítico (`pytest` +
-`pytest-asyncio`). Cubre: config, seguridad (HMAC, hash), semáforo, IPP,
-alertas (incluyendo el advisory lock y el gate de scheduler), servicios de
-IA y dashboard, endpoints del dashboard, ingesta IDEAM/clima/satélite,
-tendencias, señales de anoxia, y **`message_router.py`** (el cerebro del bot
-de WhatsApp, antes sin ningún test). `scripts/verify_alert_lock.py` prueba la
-serialización real del lock entre conexiones contra una Postgres descartable
-— **nunca apuntarlo a la Supabase real** (instrucciones en el propio script).
+`pytest-asyncio`). Cubre: config (incluyendo el fail-fast de `ADMIN_API_KEY`
+fuera de development), seguridad (HMAC, hash), semáforo, IPP, alertas
+(incluyendo el advisory lock y el gate de scheduler), servicios de IA y
+dashboard, endpoints del dashboard, ingesta IDEAM/clima/satélite, tendencias,
+señales de anoxia, **`message_router.py`** + **`condicion_message.py`** (el
+cerebro del bot de WhatsApp y el armado del mensaje de condición), y —
+agregado más recientemente, antes sin ningún test — `whatsapp_service.py`,
+`points_service.py`, `sedimentation_service.py`, `system_status_service.py`,
+y los routers `admin.py`/`sensors.py` (`TestClient` + `dependency_overrides`).
+`scripts/verify_alert_lock.py` prueba la serialización real del lock entre
+conexiones contra una Postgres descartable — **nunca apuntarlo a la Supabase
+real** (instrucciones en el propio script).
 
 Regla del proyecto: todo lo que toque el path de seguridad (HMAC, hashing)
 o el envío de alertas necesita test — no es opcional.
+
+**Lint gate:** `ruff check .` corre en CI (`.github/workflows/test.yml`)
+junto a `pytest`, configurado en `ruff.toml` (no `pyproject.toml` — Vercel
+auto-detecta `pyproject.toml` e intenta resolver dependencias con `uv lock`,
+que falla sin una tabla `[project]`; `ruff.toml` evita ese problema). Reglas
+activas: `E4, E7, E9, F` (Pyflakes + errores reales de pycodestyle, sin
+bikeshedding de estilo). CI instala desde `requirements-lock.txt` (versiones
+exactas via `pip freeze`), no `requirements.txt` (floors humanos) — Dependabot
+(`.github/dependabot.yml`) abre PRs semanales para ambos ecosistemas
+(pip y github-actions).
 
 ---
 

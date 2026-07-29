@@ -1,8 +1,16 @@
 # ADR-001: Arquitectura del Backend — CienaNet Bot
 
-**Status:** Accepted  
+**Status:** Accepted (parcialmente superada — ver nota)  
 **Date:** 2026-06-26  
 **Deciders:** Daniel (Tech Lead), Valentina (Dev)
+
+> **Nota (2026-07):** la plataforma de despliegue descrita abajo (Vercel +
+> Mangum) ya no es el destino de producción — el backend corre en el
+> servidor universitario como proceso persistente, ver
+> [STACK.md](./STACK.md) y [DEPLOYMENT.md](./DEPLOYMENT.md) (incluye una
+> deuda conocida: el proyecto Vercel sigue linkeado y deployando en
+> paralelo). El resto de esta decisión (estructura de carpetas, patrón
+> Bigger Applications, reglas de dependencias) sigue vigente.
 
 ---
 
