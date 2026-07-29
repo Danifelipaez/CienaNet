@@ -29,6 +29,7 @@ MOCK_HISTORY = {
     "captura": [{"date": "2026-06-29", "cantidad_indice": 55.0}],
     "semaphore": [{"date": "2026-06-29", "color": "green", "reason": "Condiciones favorables", "ipp_ranking": []}],
     "satellite": [{"date": "2026-06-27", "sst_celsius": 27.4, "chlorophyll_mgm3": 3.8}],
+    "water": [{"timestamp": "2026-06-29T10:00:00+00:00", "ph": 7.8, "temperature_c": 28.0, "conductivity_mscm": 5.2}],
 }
 
 
@@ -111,6 +112,7 @@ def test_history_tiene_claves(client):
     assert "semaphore" in data
     assert "satellite" in data
     assert "captura" in data
+    assert "water" in data
 
 
 def test_history_days_invalido(client):
