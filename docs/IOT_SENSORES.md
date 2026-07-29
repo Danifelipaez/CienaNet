@@ -197,10 +197,17 @@ contexto.
   texto plano. Si un sensor es comprometido, revocar solo esa key.
 - **HTTPS obligatorio en producción** — el firmware soporta TLS condicional
   vía `WiFiClientSecure` (`#if API_USE_TLS`) y valida el certificado del
-  servidor contra el root de Let's Encrypt embebido (nunca `setInsecure()`).
-  En banco de pruebas actual está desactivado (`API_USE_TLS 0`, IP LAN local)
-  — activar antes de desplegar en campo, ver checklist de
-  `docs/DEPLOYMENT.md`.
+  servidor (nunca `setInsecure()`) contra `TRUSTED_ROOTS_PEM`, que embebe DOS
+  roots concatenados en un solo buffer (`mbedtls_x509_crt_parse()` acepta
+  varios bloques PEM en un mismo string): ISRG Root X1 (Let's Encrypt, para
+  el servidor universitario vía Caddy) y GTS Root R1 (Google Trust Services,
+  para `ciena-net.vercel.app` mientras siga vivo — ver "Deuda: doble
+  despliegue" en `docs/DEPLOYMENT.md`). El root de Vercel se extrajo en vivo
+  de una conexión TLS real, no de memoria — si Vercel rota de CA antes de que
+  venza ese cross-cert (2028-01-28), hay que repetir la extracción y
+  actualizar el `.ino`. En banco de pruebas actual está desactivado
+  (`API_USE_TLS 0`, IP LAN local) — activar antes de desplegar en campo, ver
+  checklist de `docs/DEPLOYMENT.md`.
 - **Frescura del `timestamp`** — el backend rechaza con `422` lecturas cuyo
   `timestamp` sea más viejo que `MAX_READING_AGE_HOURS` (6h) o esté más de
   `MAX_FUTURE_SKEW_MINUTES` (5 min) en el futuro (`app/schemas/sensor.py`).
