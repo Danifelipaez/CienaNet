@@ -1,11 +1,10 @@
-[tool.ruff]
 line-length = 110
 target-version = "py311"
 # .claude/ trae skills de terceros (p.ej. el driver del sensor ESP32), no
 # código de la app — no aplican las convenciones de docs/GUARDRAILS.md.
 extend-exclude = [".claude"]
 
-[tool.ruff.lint]
+[lint]
 # Pyflakes + errores pycodestyle: bugs reales (imports/variables sin usar,
 # nombres indefinidos, sintaxis) sin bikeshedding de estilo (orden de imports,
 # convenciones de datetime, sugerencias de pyupgrade).
