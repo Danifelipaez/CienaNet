@@ -10,6 +10,7 @@ class WeatherData(BaseModel):
     humidity_pct: float | None = None
     wind_speed_kmh: float | None
     wind_direction_deg: float | None
+    wind_gust_kmh: float | None = None
     precipitation_mm: float | None
 
 
@@ -28,6 +29,7 @@ class SemaphoreInfo(BaseModel):
 class ZoneIPP(BaseModel):
     zone: str
     ipp: float
+    cobertura: float | None = None  # fracción 0-1 del peso IPP que tuvo dato real
 
 
 class SensorSummary(BaseModel):
@@ -35,6 +37,7 @@ class SensorSummary(BaseModel):
     ph: float | None
     temperature_c: float | None
     conductivity_mscm: float | None
+    water_level_cm: float | None = None
 
 
 class WaterQuality(BaseModel):
@@ -46,14 +49,37 @@ class WaterQuality(BaseModel):
     tds_mgl: float | None = None       # derivada APHA (§10)
 
 
+class IdeamPrecipitacionPoint(BaseModel):
+    date: str
+    estacion: str
+    precipitacion_mm: float
+
+
+class IdeamNivelPoint(BaseModel):
+    date: str
+    estacion: str
+    nivel_m: float
+
+
 class DashboardSnapshot(BaseModel):
     semaphore: SemaphoreInfo
     weather: WeatherData
+    tasajera_weather: WeatherData | None = None
     satellite: SatelliteSnapshot
     water: WaterQuality
     sensors: list[SensorSummary]
     ipp_ranking: list[ZoneIPP]
     cyclone_alerts: list[dict]
+    ideam_precipitacion: list[IdeamPrecipitacionPoint] = []
+    ideam_nivel_rio: list[IdeamNivelPoint] = []
+    # Procedencia por fuente: "medido" | "cache" | "baseline" | "sin_dato" (satellite
+    # trae un sub-dict por campo). Sin framework — ver dashboard_service.get_latest_snapshot.
+    origen: dict = {}
+    # Deltas 24h/7d por variable + lluvia acumulada 72h. Ver app/services/trends.py.
+    tendencias: dict = {}
+    # Señales compuestas (anoxia, pulso de agua dulce) — ESTIMACIONES, no
+    # mediciones. Ver app/services/signals.py.
+    senales: dict = {}
     updated_at: str
 
 
@@ -63,12 +89,13 @@ class WeatherHistoryPoint(BaseModel):
     temperature_c: float | None
     humidity_pct: float | None
     wind_speed_kmh: float | None
+    wind_gust_kmh: float | None = None
     precipitation_mm: float | None
 
 
 class SemaphoreHistoryPoint(BaseModel):
     date: date
-    color: str
+    color: str | None  # DailySemaphore.color es nullable en DB
     reason: str | None
     ipp_ranking: list | None
 
@@ -82,18 +109,6 @@ class SatelliteHistoryPoint(BaseModel):
 class CatchHistoryPoint(BaseModel):
     date: date
     cantidad_indice: float
-
-
-class IdeamPrecipitacionPoint(BaseModel):
-    date: str
-    estacion: str
-    precipitacion_mm: float
-
-
-class IdeamNivelPoint(BaseModel):
-    date: str
-    estacion: str
-    nivel_m: float
 
 
 class HistoryResponse(BaseModel):
