@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.environmental import (
@@ -22,6 +23,8 @@ from app.services.ingestion.weather import get_weather_forecast
 from app.services.ipp import rank_zones
 from app.services.semaphore import evaluate
 from app.services.sensor_service import aggregate_sensor_readings, get_latest_readings
+from app.services.signals import anoxia_risk, pulso_agua_dulce
+from app.services.trends import get_trends
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +59,18 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     tasajera_task = get_weather_forecast(settings.tasajera_lat, settings.tasajera_lon)
 
     if db_satellite:
+        # Si ya está en DB fue guardado por _save_satellite, que nunca persiste un
+        # baseline como si fuera medición (ver más abajo) — NULL en la columna sí
+        # significa "no hubo dato", nunca "medido".
         satellite_data = {
             "sst_celsius": db_satellite.sst_celsius,
             "chlorophyll_mgm3": db_satellite.chlorophyll_mgm3,
             "date": db_satellite.date.isoformat(),
+            "por_zona": db_satellite.por_zona or {},
+            "origen": {
+                "sst_celsius": "medido" if db_satellite.sst_celsius is not None else "sin_dato",
+                "chlorophyll_mgm3": "medido" if db_satellite.chlorophyll_mgm3 is not None else "sin_dato",
+            },
         }
         weather_data, tasajera_weather, alerts = await asyncio.gather(
             get_weather_forecast(),
@@ -74,6 +85,14 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
             get_cyclone_alerts(),
         )
 
+    # "origen" viaja dentro de cada dict de ingesta (medido/cache/baseline/sin_dato)
+    # hasta acá. Se extrae a un bloque aparte para el snapshot; en particular debe
+    # salir de weather_data/tasajera_weather ANTES de _save_weather, cuyo check de
+    # "¿hay algún valor no-None?" contaría el string de origen como dato real.
+    weather_origen = weather_data.pop("origen", "sin_dato")
+    tasajera_origen = tasajera_weather.pop("origen", "sin_dato")
+    satellite_origen = satellite_data.get("origen") or {}
+
     # DB: lecturas de sensores (sesión separada del gather externo)
     readings = await get_latest_readings(db)
 
@@ -85,10 +104,11 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     ideam_precipitacion, ideam_nivel_rio = await ideam_task
 
     # Persistencia secuencial (una sola sesión async, no concurrent). Cada guardado
-    # va envuelto: get_latest_snapshot() lo llama también message_router.py (bot de
-    # WhatsApp) y el cron de Vercel — un fallo de un guardado (p.ej. migración
-    # pendiente en esta DB) no debe romper la respuesta al pescador ni tumbar el
-    # resto de guardados de este mismo snapshot.
+    # va envuelto: get_latest_snapshot() es el camino de ESCRITURA — lo llaman el
+    # cron/scheduler horario y GET /data/latest — un fallo de un guardado (p.ej.
+    # migración pendiente en esta DB) no debe tumbar el resto de guardados de este
+    # mismo snapshot. El bot de WhatsApp NO llama esta función: lee lo ya persistido
+    # vía snapshot_service.read_persisted() (cero red, cero escrituras por mensaje).
     try:
         await _save_weather(db, weather_data, "CGSM")
         await _save_weather(db, tasajera_weather, "Tasajera")
@@ -111,6 +131,22 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         logger.warning("No se pudo guardar respaldo IDEAM en DB: %s", exc)
         await db.rollback()
 
+    # Después de persistir, para que refleje lo que este mismo ciclo acaba de
+    # guardar. Cero llamadas de red — agrega sobre lo que ya está en DB.
+    tendencias = await get_trends(db)
+
+    # Señales compuestas — ESTIMACIONES, no mediciones (ver app/services/signals.py).
+    # Solo dashboard por ahora: los umbrales de anoxia no están validados contra un
+    # evento real todavía, y el riesgo de un falso positivo (día de pesca perdido,
+    # credibilidad quemada) es asimétrico frente al de un falso negativo. El bot
+    # tiene el mecanismo listo (message_router._ANOXIA_EN_BOT) pero apagado.
+    senales = {
+        "anoxia": anoxia_risk(satellite_data, weather_data, water),
+        "pulso_agua_dulce": pulso_agua_dulce(
+            tendencias.get("lluvia_72h_mm"), water.get("salinity_psu")
+        ),
+    }
+
     return {
         "semaphore": {
             "color": semaphore.color,
@@ -129,11 +165,20 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
                 "ph": r.ph,
                 "temperature_c": r.temperature_c,
                 "conductivity_mscm": r.conductivity_mscm,
+                "water_level_cm": r.water_level_cm,
             }
             for r in readings
         ],
         "ipp_ranking": ipp,
         "cyclone_alerts": alerts,
+        "tendencias": tendencias,
+        "senales": senales,
+        "origen": {
+            "weather": weather_origen,
+            "tasajera_weather": tasajera_origen,
+            "satellite": satellite_origen,
+            "water": "medido" if water else "sin_dato",
+        },
         "updated_at": datetime.now(UTC).isoformat(),
     }
 
@@ -148,8 +193,9 @@ def build_ai_context(snapshot: dict) -> str:
     """
     parts = [
         f"Semáforo: {snapshot['semaphore']['reason']}.",
-        f"Clorofila-a: {snapshot['satellite'].get('chlorophyll_mgm3')} mg/m³ (Copernicus Marine). "
-        f"Temperatura superficial del agua: {snapshot['satellite'].get('sst_celsius')} °C (NASA MODIS).",
+        f"Clorofila-a: {snapshot['satellite'].get('chlorophyll_mgm3')} mg/m³ (Sentinel-3 OLCI vía NOAA "
+        f"CoastWatch). Temperatura superficial del agua: {snapshot['satellite'].get('sst_celsius')} °C "
+        f"(NASA MUR, jplMURSST41).",
     ]
 
     def fmt_weather(label: str, w: dict) -> str:
@@ -279,6 +325,7 @@ async def get_history(db: AsyncSession, days: int) -> dict:
                 "temperature_c": r.temperature_c,
                 "humidity_pct": r.humidity_pct,
                 "wind_speed_kmh": r.wind_speed_kmh,
+                "wind_gust_kmh": r.wind_gust_kmh,
                 "precipitation_mm": r.precipitation_mm,
             }
             for r in weather_rows
@@ -333,6 +380,7 @@ async def _save_weather(db: AsyncSession, data: dict, estacion: str = "CGSM") ->
             humidity_pct=data.get("humidity_pct"),
             wind_speed_kmh=data.get("wind_speed_kmh"),
             wind_direction_deg=data.get("wind_direction_deg"),
+            wind_gust_kmh=data.get("wind_gust_kmh"),
             precipitation_mm=data.get("precipitation_mm"),
         )
     )
@@ -358,42 +406,52 @@ async def _save_satellite(db: AsyncSession, data: dict, today: date) -> None:
     if existing:
         return
 
+    # No persistir baselines como si fueran medición: si el origen de un campo es
+    # "baseline" (la API externa falló o el valor cayó fuera de rango), se guarda
+    # NULL — la columna ya es nullable, y ausencia = "no hubo dato", que es la
+    # verdad. Antes un 28.0°C / 4.5 mg/m³ de respaldo quedaba en la DB
+    # indistinguible de una medición real para siempre.
+    origen = data.get("origen") or {}
+    sst = data.get("sst_celsius")
+    chlorophyll = data.get("chlorophyll_mgm3")
+    if origen.get("sst_celsius") == "baseline":
+        sst = None
+    if origen.get("chlorophyll_mgm3") == "baseline":
+        chlorophyll = None
+
     db.add(
         SatelliteData(
             source="nasa_mur",
             date=sat_date,
-            sst_celsius=data.get("sst_celsius"),
-            chlorophyll_mgm3=data.get("chlorophyll_mgm3"),
+            sst_celsius=sst,
+            chlorophyll_mgm3=chlorophyll,
+            por_zona=data.get("por_zona") or None,
         )
     )
     await db.commit()
 
 
 async def _save_ideam_hidro(db: AsyncSession, precipitacion: list[dict], nivel: list[dict]) -> None:
-    """Guarda lecturas diarias IDEAM nuevas. Dedup por (variable, estacion, date):
-    si ya existe la fila se salta — no se sobreescribe (mismo criterio que
-    `_save_satellite`), así que un día ya guardado con dato parcial no se corrige
-    después; el rezago propio de la fuente (~2 días) hace que esto sea poco común.
+    """Guarda lecturas diarias IDEAM nuevas. Dedup por (variable, estacion, date) vía
+    ON CONFLICT DO NOTHING sobre la unique constraint del modelo — no se sobreescribe
+    (mismo criterio que `_save_satellite`), así que un día ya guardado con dato parcial
+    no se corrige después; el rezago propio de la fuente (~2 días) hace que esto sea
+    poco común. Un solo INSERT (no un SELECT+INSERT por fila): evita el IntegrityError
+    que un SELECT-then-INSERT produciría si dos refrescos corren en paralelo.
     """
-    rows = [("precipitacion_mm", r["estacion"], r["date"], r["precipitacion_mm"]) for r in precipitacion]
-    rows += [("nivel_m", r["estacion"], r["date"], r["nivel_m"]) for r in nivel]
+    rows = [
+        {"variable": "precipitacion_mm", "estacion": r["estacion"], "date": date.fromisoformat(r["date"]), "valor": r["precipitacion_mm"]}
+        for r in precipitacion
+    ] + [
+        {"variable": "nivel_m", "estacion": r["estacion"], "date": date.fromisoformat(r["date"]), "valor": r["nivel_m"]}
+        for r in nivel
+    ]
+    if not rows:
+        return
 
-    for variable, estacion, date_str, valor in rows:
-        row_date = date.fromisoformat(date_str)
-        existing = (
-            await db.execute(
-                select(IdeamHidroReading).where(
-                    IdeamHidroReading.variable == variable,
-                    IdeamHidroReading.estacion == estacion,
-                    IdeamHidroReading.date == row_date,
-                ).limit(1)  # tolera duplicados en la comprobación de existencia
-            )
-        ).scalar_one_or_none()
-        if existing:
-            continue
-        db.add(
-            IdeamHidroReading(variable=variable, estacion=estacion, date=row_date, valor=valor)
-        )
+    stmt = pg_insert(IdeamHidroReading).values(rows)
+    stmt = stmt.on_conflict_do_nothing(index_elements=["variable", "estacion", "date"])
+    await db.execute(stmt)
     await db.commit()
 
 
