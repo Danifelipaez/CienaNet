@@ -26,8 +26,9 @@ from app.schemas.dashboard import (
     AskRequest,
     AskResponse,
 )
+from app.services.ai_context import build_ai_context, camaron_moonrise_hint
 from app.services.ai_service import get_ai_provider
-from app.services.dashboard_service import build_ai_context, camaron_moonrise_hint, get_latest_snapshot
+from app.services.dashboard_service import get_latest_snapshot
 from app.services.points_service import get_points
 from app.services.sedimentation_service import get_sedimentation_zones
 from app.services.system_status_service import get_system_status

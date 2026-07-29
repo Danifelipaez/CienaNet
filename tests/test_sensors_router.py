@@ -1,0 +1,75 @@
+"""Tests de app/api/v1/routers/sensors.py — POST /sensors/ingest tras X-Api-Key."""
+
+import uuid
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.api.v1.dependencies import get_current_sensor
+from app.core.database import get_db
+from app.main import app
+from app.models.environmental import Sensor
+
+VALID_READING = {
+    "sensor_id": "esp32-01",
+    "timestamp": "2026-07-29T12:00:00+00:00",
+    "ph": 7.6,
+    "temperature_c": 28.0,
+}
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def mock_db():
+    mock_session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None  # sin sensor -> API key inválida
+    mock_session.execute.return_value = mock_result
+    mock_session.add = MagicMock()
+
+    async def override_get_db():
+        yield mock_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    yield mock_session
+    app.dependency_overrides.clear()
+
+
+def test_ingest_sin_api_key_rechaza(client):
+    resp = client.post("/api/v1/sensors/ingest", json=VALID_READING)
+    assert resp.status_code == 422  # falta el header requerido
+
+
+def test_ingest_api_key_invalida_rechaza(client):
+    resp = client.post(
+        "/api/v1/sensors/ingest", json=VALID_READING, headers={"X-Api-Key": "no-existe"}
+    )
+    assert resp.status_code == 403
+
+
+def test_ingest_lectura_fuera_de_rango_rechaza(client):
+    sensor = Sensor(id=uuid.uuid4(), device_id="esp32-01", api_key_hash="x", active=True)
+    app.dependency_overrides[get_current_sensor] = lambda: sensor
+    resp = client.post(
+        "/api/v1/sensors/ingest",
+        json={**VALID_READING, "ph": 20.0},
+        headers={"X-Api-Key": "valida"},
+    )
+    assert resp.status_code == 422  # validación Pydantic (rango 0-14), ver schemas/sensor.py
+
+
+def test_ingest_ok_persiste_y_actualiza_last_seen(client, mock_db):
+    sensor = Sensor(id=uuid.uuid4(), device_id="esp32-01", api_key_hash="x", active=True)
+    app.dependency_overrides[get_current_sensor] = lambda: sensor
+    resp = client.post(
+        "/api/v1/sensors/ingest", json=VALID_READING, headers={"X-Api-Key": "valida"}
+    )
+    assert resp.status_code == 201
+    assert resp.json() == {"status": "ok"}
+    mock_db.add.assert_called_once()
+    assert sensor.last_seen is not None

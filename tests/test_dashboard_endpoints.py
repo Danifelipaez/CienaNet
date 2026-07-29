@@ -3,7 +3,7 @@
 Mockea DB y APIs externas — verifica estructura de respuesta, no datos reales.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

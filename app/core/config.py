@@ -1,5 +1,6 @@
 """Configuración de la app cargada desde variables de entorno (.env)."""
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +37,11 @@ class Settings(BaseSettings):
     # loop horario (_hourly_refresh en app/main.py) — debe estar en true en un
     # único deployment a la vez. Ver docs/DEPLOYMENT.md.
     run_scheduler: bool = False
+    # Orígenes de navegador con permiso CORS, separados por coma. Vacío por
+    # defecto: el frontend habla con este backend server-to-server vía
+    # BACKEND_URL (ver docs/ARCHITECTURE.md), nunca desde el navegador — así
+    # que ningún origen de navegador es legítimo salvo que se agregue uno acá.
+    cors_allowed_origins: str = ""
 
     # Coordenadas centro de la Ciénaga Grande (no secretos)
     # Centroide real medido (ver docs/KNOWLEDGE_BASE.md #12)
@@ -54,6 +60,17 @@ class Settings(BaseSettings):
     # Sector "FG" (Sentinel-3 OLCI, ~278m/diario) cubre la CGSM — ver docs/RESOLUCION_FUENTES.md.
     # Cambia si NOAA reorganiza los sectores (216 en total, uno por bloque geográfico).
     erddap_chl_dataset: str = "noaacwS3AOLCIchlaSectorFGDaily"
+
+    @model_validator(mode="after")
+    def _reject_default_admin_key_outside_dev(self) -> "Settings":
+        # Guarda /admin/* (registro de sensores) y los proxies del dashboard
+        # (require_admin). "change-me" es el default público, documentado en
+        # docs/KNOWLEDGE_BASE.md — fallar cerrado si queda así fuera de dev.
+        if self.environment != "development" and self.admin_api_key in ("", "change-me"):
+            raise ValueError(
+                "ADMIN_API_KEY no puede quedar en el valor por defecto fuera de development"
+            )
+        return self
 
 
 settings = Settings()
