@@ -3,7 +3,7 @@
 # (floors humanos); regenerar este archivo con:
 #   pip install -r requirements.txt && pip freeze > requirements-lock.txt
 alembic==1.18.5
-annotated-doc==0.0.4
+annotated-doc==0.0.5
 annotated-types==0.7.0
 anyio==4.14.1
 asyncpg==0.31.0
