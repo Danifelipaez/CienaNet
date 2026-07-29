@@ -167,12 +167,59 @@ Las coordenadas y zona de cada sensor se registran en la tabla `sensors` de la D
 
 ---
 
+## Metodologías de Conectividad Evaluadas
+
+Se evaluaron tres formas de darle acceso a internet a la boya. El firmware
+real (`firmware/alt_tend_sensor/alt_tend_sensor.ino`) usa WiFi STA estándar
+(`conectarWiFi()`), y esa elección es **agnóstica** al origen de la red:
+
+| Método | Estado | Modelo de confianza |
+|---|---|---|
+| WiFi STA (router o hotspot celular/PC — mismo modo) | **Implementado, recomendado** | El ESP32 habla TLS end-to-end directo contra el backend (`WiFiClientSecure` + certificado raíz de Let's Encrypt embebido, cuando `API_USE_TLS=1`); el punto de acceso (router o hotspot) es solo tránsito, nunca ve el payload en claro |
+| Módulo celular SIM7600 | Futuro (Fase 2, sin hardware en mano todavía) | Mismo modelo que WiFi — TLS end-to-end, solo cambia la capa de acceso (UART2 en vez de radio WiFi) |
+| Bridge por PC/USB (relay serial) | **Descartado** | El PC tendría que terminar/reoriginar la conexión TLS, viendo la API key y el payload en texto plano en esa etapa — algo que hoy no ocurre. Además exige un PC permanentemente encendido junto a la boya, lo que rompe el diseño de boya autónoma a batería con deep sleep |
+
+Router doméstico/institucional y hotspot compartido desde celular/PC son
+**el mismo código, sin rama distinta** — solo cambia `WIFI_SSID`/
+`WIFI_PASSWORD` en `config.h` (ver comentario ahí). El bridge por PC/USB se
+descartó explícitamente porque la prioridad es la máxima independencia de la
+boya; queda documentado aquí para que no se vuelva a proponer sin este
+contexto.
+
+---
+
 ## Seguridad del Firmware
 
-- **API key única por dispositivo** — si un sensor es comprometido, revocar solo esa key
-- **API key en EEPROM cifrada** del ESP32, no en código fuente
-- **HTTPS obligatorio** — ESP32 soporta TLS con la librería WiFiClientSecure
-- **Verificar certificado del servidor** — no usar `setInsecure()` en producción
+- **API key única por dispositivo** — vive en `config.h` (gitignored, nunca
+  en el código fuente versionado), viaja en el header `X-Api-Key` de cada
+  request, y el backend la verifica con PBKDF2-HMAC-SHA256 sobre un hash
+  guardado en DB (`app/core/security.py::verify_sensor_api_key`) — nunca en
+  texto plano. Si un sensor es comprometido, revocar solo esa key.
+- **HTTPS obligatorio en producción** — el firmware soporta TLS condicional
+  vía `WiFiClientSecure` (`#if API_USE_TLS`) y valida el certificado del
+  servidor (nunca `setInsecure()`) contra `TRUSTED_ROOTS_PEM`, que embebe DOS
+  roots concatenados en un solo buffer (`mbedtls_x509_crt_parse()` acepta
+  varios bloques PEM en un mismo string): ISRG Root X1 (Let's Encrypt, para
+  el servidor universitario vía Caddy) y GTS Root R1 (Google Trust Services,
+  para `ciena-net.vercel.app` mientras siga vivo — ver "Deuda: doble
+  despliegue" en `docs/DEPLOYMENT.md`). El root de Vercel se extrajo en vivo
+  de una conexión TLS real, no de memoria — si Vercel rota de CA antes de que
+  venza ese cross-cert (2028-01-28), hay que repetir la extracción y
+  actualizar el `.ino`. En banco de pruebas actual está desactivado
+  (`API_USE_TLS 0`, IP LAN local) — activar antes de desplegar en campo, ver
+  checklist de `docs/DEPLOYMENT.md`.
+- **Frescura del `timestamp`** — el backend rechaza con `422` lecturas cuyo
+  `timestamp` sea más viejo que `MAX_READING_AGE_HOURS` (6h) o esté más de
+  `MAX_FUTURE_SKEW_MINUTES` (5 min) en el futuro (`app/schemas/sensor.py`).
+  Es defensa en profundidad contra replay de un payload capturado en una red
+  hostil (ej. un hotspot público) y atrapa bugs de reloj del ESP32, sin
+  rechazar los reintentos legítimos del buffer RTC (que en el peor caso real
+  llegan con ~1h de atraso).
+- **Identidad de sensor_id vinculada a la API key** — el backend rechaza con
+  `422` si el `sensor_id` del payload no coincide con el `device_id` del
+  sensor autenticado por `X-Api-Key` (`app/services/sensor_service.py`), para
+  que la key de un sensor no pueda escribir lecturas bajo el `sensor_id` de
+  otro.
 
 ---
 

@@ -1,6 +1,7 @@
 """Tests de trust boundary de sensores: validación de rango y filtro de frescura."""
 
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,7 +14,9 @@ from app.services.sensor_service import get_latest_readings
 def _reading(**overrides):
     base = {
         "sensor_id": "s1",
-        "timestamp": "2026-07-28T12:00:00Z",
+        # dinámico: SensorReadingIn rechaza timestamps viejos (ver
+        # timestamp_within_freshness_window en app/schemas/sensor.py)
+        "timestamp": datetime.now(UTC).isoformat(),
         "ph": 7.5,
         "conductivity_mscm": 10.0,
         "temperature_c": 28.0,

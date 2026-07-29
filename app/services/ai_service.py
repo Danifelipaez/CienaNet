@@ -100,10 +100,11 @@ class GeminiProvider:
     async def _generate(self, system: str, contents: list[dict], *, json_schema: dict | None = None) -> str | None:
         """POST a Gemini. Devuelve el texto del primer candidate, o None si algo falla."""
         url = _GENERATE_URL.format(model=settings.ai_model)
-        # thinkingBudget=0 desactiva el "thinking" de Gemini 3: sin él la latencia salta
-        # esporádicamente por encima del timeout (→ fallback) y cuesta más tokens. Este
-        # caso de uso (Q&A ambiental) no necesita razonamiento extendido.
-        generation_config: dict = {"thinkingConfig": {"thinkingBudget": 0}}
+        # ponytail: sin thinkingConfig — thinkingBudget=0 rompía TODAS las llamadas
+        # (400 INVALID_ARGUMENT) desde que el alias "-latest" rodó a gemini-3.5-flash-lite,
+        # que ya no acepta ese valor. Retomar la optimización de latencia/tokens solo si
+        # se confirma manualmente qué valores de thinkingBudget acepta el modelo vigente.
+        generation_config: dict = {}
         if json_schema is not None:
             generation_config["responseMimeType"] = "application/json"
             generation_config["responseSchema"] = json_schema
