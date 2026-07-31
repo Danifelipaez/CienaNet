@@ -211,7 +211,9 @@ bool conectarWiFi() {
     // el redibujado del spinner se throttlea a ~200ms para no saturar el bus SPI
     int frame = ((millis() - start) / 200) % 8;
     if (frame != lastFrame) {
-      showWifiConnectingScreen(frame);
+#if DISPLAY_ENABLED
+      showWifiConnectingScreen(frame);  // pantalla siempre encendida: mostrar tambien el spinner de conexion
+#endif
       lastFrame = frame;
     }
     delay(30);
@@ -285,9 +287,21 @@ int postReading(const char *jsonBody) {
 }
 
 PostOutcome classifyHttpStatus(int statusCode) {
-  if (statusCode == 201) return POST_SUCCESS;
-  if (statusCode == 403 || statusCode == 422) return POST_PERMANENT_FAIL;  // key mala / fuera de rango: reintentar es inutil
+  if (statusCode >= 200 && statusCode < 300) return POST_SUCCESS;        // 201 esperado, pero cualquier 2xx cuenta
+  if (statusCode >= 400 && statusCode < 500) return POST_PERMANENT_FAIL; // error del cliente (key mala, payload invalido): reintentar es inutil
   return POST_TRANSIENT_FAIL;  // timeout, sin respuesta, 5xx
+}
+
+// Reintenta solo fallos transitorios (timeout/5xx) -- exito o fallo permanente
+// cortan el loop de inmediato. UPLOAD_MAX_RETRIES/UPLOAD_RETRY_DELAY_MS en config.h.
+int postReadingWithRetries(const char *jsonBody) {
+  int status;
+  for (int attempt = 1; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
+    status = postReading(jsonBody);
+    if (classifyHttpStatus(status) != POST_TRANSIENT_FAIL) break;
+    if (attempt < UPLOAD_MAX_RETRIES) delay(UPLOAD_RETRY_DELAY_MS);
+  }
+  return status;
 }
 
 // ===== BUFFER RTC =====
@@ -310,7 +324,7 @@ void flushRtcBuffer() {
   char json[256];
   while (rtcBufferCount > 0) {
     buildReadingJSON(rtcBuffer[0], json, sizeof(json));
-    int status = postReading(json);
+    int status = postReadingWithRetries(json);
     lastHttpStatus = status;
     if (classifyHttpStatus(status) == POST_TRANSIENT_FAIL) {
       break;  // servidor sigue sin responder bien: no seguir golpeando el resto del buffer
@@ -466,6 +480,14 @@ void playResultFlourish() {
   }
 }
 
+// Apaga la pantalla (todos los pixeles en negro) -- en SH110X el consumo es
+// proporcional a pixeles encendidos, asi que esto si ahorra energia real,
+// a diferencia de simplemente dejar de dibujar frames nuevos.
+void blankDisplay() {
+  display.clearDisplay();
+  display.display();
+}
+
 // ===== OLED =====
 void updateDisplay() {
   display.clearDisplay();
@@ -529,16 +551,32 @@ void runCycle() {
     showSendingScreen();
     flushRtcBuffer();
 
-    PendingReading current = currentReading();
-    char json[256];
-    buildReadingJSON(current, json, sizeof(json));
-    lastHttpStatus = postReading(json);
+    if (rtc_ntp_synced) {
+      PendingReading current = currentReading();
+      char json[256];
+      buildReadingJSON(current, json, sizeof(json));
+      lastHttpStatus = postReadingWithRetries(json);
 
-    if (classifyHttpStatus(lastHttpStatus) == POST_TRANSIENT_FAIL && rtc_ntp_synced) {
-      rtcBufferPush(current);
+      if (classifyHttpStatus(lastHttpStatus) == POST_TRANSIENT_FAIL) {
+        rtcBufferPush(current);
+      }
+
+      playResultFlourish();  // termina dejando dibujado el dashboard final (updateDisplay())
+#if !DISPLAY_ENABLED
+      // modo bajo demanda: mantener el ultimo dato capturado en pantalla un
+      // rato y despues apagarla -- solo se encendio para este envio
+      delay(DISPLAY_ON_SECONDS * 1000UL);
+      blankDisplay();
+#endif
+    } else {
+      // wifi ok pero sin hora NTP confiable todavia (tipico del primer arranque
+      // en frio, si el sync es lento o falla): no hay timestamp real que ponerle
+      // a la lectura -- no se envia ni se encola nada, se reintenta fresco en el
+      // proximo ciclo (mismo criterio que la rama sin wifi de abajo)
+#if DISPLAY_ENABLED
+      updateDisplay();
+#endif
     }
-
-    playResultFlourish();  // termina dejando dibujado el dashboard final (updateDisplay())
   } else {
     lastHttpStatus = -1;  // sin WiFi, ni se intento
     if (rtc_ntp_synced) {
@@ -546,7 +584,11 @@ void runCycle() {
     }
     // si tampoco hay hora NTP confiable todavia, no se encola nada este ciclo
     // (no hay timestamp real que ponerle) -- se reintenta fresco en el proximo ciclo
+    // modo bajo demanda (DISPLAY_ENABLED 0): la pantalla solo se enciende al
+    // enviar datos, asi que en esta rama (sin wifi) se queda apagada
+#if DISPLAY_ENABLED
     updateDisplay();
+#endif
   }
 
   streamDebugJSON();
