@@ -6,18 +6,7 @@ Este archivo es el punto de entrada para cualquier asistente de IA trabajando en
 Backend FastAPI para **CienRayas**, una app que entrega información ambiental de la Ciénaga Grande de Santa Marta a pescadores artesanales vía WhatsApp. Ver `/docs/CONTEXT.md` para contexto completo.
 
 ## Stack
-Python 3.11 + FastAPI + Supabase (PostgreSQL) + Meta WhatsApp Cloud API. Desplegado en el servidor universitario. El frontend (dashboard Next.js) vive en un repo separado, `CienaRed-Frontend`, desplegado en Vercel. Ver `/docs/STACK.md` y `/docs/DEPLOYMENT.md`.
-
-## Estructura del proyecto
-```
-app/
-├── api/v1/routers/   ← solo HTTP, sin lógica de negocio
-├── services/         ← toda la lógica aquí
-├── models/           ← SQLAlchemy ORM
-├── schemas/          ← Pydantic request/response
-└── core/             ← config, db, security
-docs/                 ← documentación para IA y equipo
-```
+Desplegado en el servidor universitario. El frontend (dashboard Next.js) vive en un repo separado, `CienaRed-Frontend`, desplegado en Vercel. Ver `/docs/STACK.md` y `/docs/DEPLOYMENT.md`.
 
 ## Reglas que siempre aplican
 1. Validar firma HMAC en TODOS los webhooks de Meta antes de procesar

@@ -40,6 +40,12 @@
 #define WIFI_CONNECT_TIMEOUT_MS 8000
 #define HTTP_TIMEOUT_MS 4000
 
+#define UPLOAD_MAX_RETRIES 5     // intentos maximos por lectura si el POST falla (timeout/5xx)
+#define UPLOAD_RETRY_DELAY_MS 2000  // espera entre reintentos
+
+#define DISPLAY_ENABLED 1  // 1 = pantalla siempre encendida; 0 = apagada, se enciende solo al enviar datos
+#define DISPLAY_ON_SECONDS 30  // con DISPLAY_ENABLED 0: cuanto se mantiene el ultimo dato antes de apagar
+
 #define NTP_SERVER "pool.ntp.org"
 #define GMT_OFFSET_SEC 0
 #define DAYLIGHT_OFFSET_SEC 0  // todo en UTC (timestamp con sufijo "Z"), sin horario de verano
