@@ -4,13 +4,14 @@
 **Date:** 2026-06-26  
 **Deciders:** Daniel (Tech Lead), Valentina (Dev)
 
-> **Nota (2026-07):** la plataforma de despliegue descrita abajo (Vercel +
-> Mangum) ya no es el destino de producción — el backend corre en el
-> servidor universitario como proceso persistente, ver
-> [STACK.md](./STACK.md) y [DEPLOYMENT.md](./DEPLOYMENT.md) (incluye una
-> deuda conocida: el proyecto Vercel sigue linkeado y deployando en
-> paralelo). El resto de esta decisión (estructura de carpetas, patrón
-> Bigger Applications, reglas de dependencias) sigue vigente.
+> **Nota (2026-08):** la plataforma de despliegue descrita abajo ya no es
+> exactamente esta. El destino principal es el servidor universitario, como
+> proceso persistente (webhook, sensores, scheduler); Vercel sigue vivo como
+> segundo deployment de la API de lectura, ahora configurado explícitamente y
+> **sin Mangum** — el runtime de Python de Vercel sirve ASGI de forma nativa, así
+> que `api/index.py` solo re-exporta `app.main:app`. Ver [STACK.md](./STACK.md) y
+> [DEPLOYMENT.md](./DEPLOYMENT.md). El resto de esta decisión (estructura de
+> carpetas, patrón Bigger Applications, reglas de dependencias) sigue vigente.
 
 ---
 

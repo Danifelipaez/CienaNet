@@ -1,0 +1,22 @@
+# Fuera del bundle serverless: nada de esto se importa en runtime y todo suma
+# al límite de 250 MB de la función (ver api/requirements.txt).
+tests/
+docs/
+firmware/
+scripts/
+alembic/
+alembic.ini
+.github/
+.claude/
+.agents/
+.scratch_decoded/
+Dockerfile
+docker-compose.yml
+Caddyfile
+.dockerignore
+ruff.toml
+requirements-lock.txt
+*.md
+.env
+.env.*
+!.env.example

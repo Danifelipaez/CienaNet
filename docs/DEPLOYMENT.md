@@ -1,61 +1,135 @@
 # Despliegue
 
-Backend y frontend viven en repos separados y cada uno se despliega en un
-único destino:
+Backend y frontend viven en repos separados. El backend se despliega en dos
+destinos con roles distintos (ver "Vercel" más abajo):
 
 | Componente | Destino | Repo |
 |---|---|---|
-| Backend (FastAPI) | Servidor universitario | este repo |
+| Backend (FastAPI) — webhook, sensores, scheduler | Servidor universitario | este repo |
+| Backend (FastAPI) — API de lectura + cron diario | Vercel (proyecto `ciena-net`) | este repo |
 | Frontend (dashboard Next.js) | Vercel | `CienaRed-Frontend` |
 
 Ambos apuntan a la **misma base de datos Supabase**. El frontend habla con el
 backend server-to-server vía `BACKEND_URL` (ver `lib/api.ts` en el repo del
 frontend) — nunca hay fetches al backend desde el navegador.
 
-## Deuda: doble despliegue del backend (Vercel sigue vivo)
+## Vercel (segundo destino del backend)
 
-**Confirmado 2026-07-29:** aunque la tabla de arriba dice que el backend
-tiene un único destino, el proyecto Vercel de este mismo repo (`ciena-net`,
-linkeado vía `.vercel/repo.json`, gitignored) nunca se desvinculó. Cada push
-a `main` sigue disparando un build+deploy real, y `ciena-net.vercel.app`
-sirve tráfico en producción en paralelo al servidor universitario — no es un
-artefacto muerto, se verificó con `vercel logs` y pegándole a los endpoints
-reales (`/api/v1/data/latest`, `/api/v1/dashboard/points`, etc. — todos 200).
+La config vive en el repo: `vercel.json`, `api/index.py`, `api/requirements.txt`
+y `.vercelignore`. Antes existía solo el proyecto Vercel `ciena-net` linkeado a
+este repo (`.vercel/repo.json`, gitignored), deployando en cada push a `main` sin
+ningún archivo versionado — Vercel detectaba la app ASGI por su cuenta. Eso
+servía tráfico real, pero dejaba el despliegue sin cron, sin timeout declarado y
+sin control de qué se sube.
 
-`api/index.py` y `vercel.json` (el entry point Mangum) se borraron hace
-tiempo del repo (ver STACK.md), pero Vercel sigue sirviendo el ASGI app de
-todos modos vía detección propia — no depende de esos archivos como se
-pensaba.
+### Qué sirve cada destino
 
-Dos riesgos concretos de dejarlo así:
-1. **Preview deployments crashean con 500 en cada request.** Cualquier
-   branch que no sea `main` (p.ej. `Developing`) hace deploy en el entorno
-   "Preview" de Vercel, y las variables de entorno de Supabase/Postgres
-   (`POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING`, `SUPABASE_URL`,
-   `SUPABASE_SERVICE_ROLE_KEY`) solo están configuradas para el entorno
-   "Production" en el dashboard de Vercel. `Settings()` revienta al importar
-   `app/main.py` (`ValidationError`, 4 campos faltantes) y **todas** las
-   requests devuelven 500, incluso `/favicon.ico`.
-2. **Posible duplicación del scheduler.** Si el proyecto Vercel tiene
-   `RUN_SCHEDULER=true` configurado (no verificado desde aquí — requiere
-   revisar el dashboard de Vercel), habría dos procesos evaluando alertas y
-   mandando WhatsApp a los mismos pescadores. El advisory lock de
-   `maybe_send_alert` protege contra llamadas concurrentes, pero no contra
-   dos deployments corriendo el loop horario de forma independiente.
+| | Servidor universitario | Vercel |
+|---|---|---|
+| API de lectura (`/data/*`, `/dashboard/*`, `/health`) | sí | sí |
+| Webhook de WhatsApp (Meta apunta a un solo host) | sí | no |
+| Ingesta de sensores ESP32 (el firmware apunta a un solo host) | sí | no |
+| Scheduler horario + envío de alertas (`RUN_SCHEDULER`) | sí | **no, nunca** |
+| Refresco diario del snapshot (cron de `vercel.json`) | no | sí |
 
-**Acción recomendada:** decidir explícitamente entre (a) desvincular/borrar
-el proyecto Vercel del backend ya que el servidor universitario es el
-destino real, o (b) si se quiere mantener como respaldo caliente, completar
-las variables de entorno también en el scope "Preview" y confirmar
-`RUN_SCHEDULER=false` ahí. Ninguna de las dos requiere cambios de código.
+`RUN_SCHEDULER` **debe quedar en `false`** en el proyecto Vercel. No es un
+detalle de configuración: `_hourly_refresh` llama a `maybe_send_alert`, que manda
+WhatsApp a *todos* los pescadores suscritos ante cualquier cambio de color del
+semáforo. Dos deployments corriendo el loop = alertas duplicadas a personas
+reales. El advisory lock de `maybe_send_alert` serializa llamadas concurrentes,
+pero no impide que dos deployments evalúen el semáforo por turnos y manden dos
+veces. (En serverless el loop igual no sobreviviría: la función se congela entre
+requests, así que el `asyncio.sleep(3600)` nunca termina de dormir.)
+
+### Archivos
+
+- **`api/index.py`** — re-exporta `app.main:app`. El runtime de Python de Vercel
+  sirve ASGI de forma nativa, así que **no** lleva Mangum: el entry point viejo
+  (borrado en 90942c0) sí lo usaba, pero Mangum traduce ASGI al protocolo handler
+  de AWS Lambda, que no es el que Vercel espera.
+- **`vercel.json`** — tres cosas:
+  - `rewrites`: todo el tráfico entra por la función `/api/index`; el ruteo real
+    (incluido el prefijo `/api/v1`) lo hace FastAPI adentro.
+  - `crons`: `GET /api/v1/data/latest` una vez al día (00:00 UTC = 19:00 hora
+    Colombia). Ese endpoint refresca y persiste el snapshot ambiental y **nunca**
+    manda alertas — es el cron diario que ya asumían los comentarios de
+    `app/services/dashboard_service.py` y `.env.example`. El plan Hobby permite
+    crons diarios, no más frecuentes.
+  - `functions.maxDuration = 60`: el default de 10 s no alcanza, `/data/latest`
+    llama a ERDDAP, Open-Meteo, IDEAM y NOAA en el mismo request. 60 s es el
+    máximo del plan Hobby.
+- **`api/requirements.txt`** — subconjunto de runtime de `requirements.txt`. El
+  runtime de Python lo prefiere por estar junto al entry point. Deja afuera
+  pytest, ruff, uvicorn, alembic, psycopg2-binary y el SDK de supabase (que no se
+  importa en ningún punto de `app/`).
+- **`.vercelignore`** — tests, docs, firmware, alembic, scripts y config del
+  servidor fuera del bundle.
+
+### Límite de tamaño de la función (250 MB)
+
+Medido con los floors actuales: el set de runtime instala **~215 MB**, de los
+cuales ~150 MB son pandas + numpy, que entran solo porque `erddapy` los arrastra.
+Margen real: ~35 MB. Consecuencias prácticas:
+
+- Instalar el `requirements.txt` completo (ruff ~30 MB, pytest, supabase,
+  alembic) pasa el límite — de ahí que exista `api/requirements.txt`.
+- `erddapy.to_xarray()`, que usa `_fetch_sst`, necesita `xarray` + `netCDF4`, y
+  **hoy no están en ningún requirements** — o sea que la SST cae al baseline en
+  los dos deployments (`get_sst` atrapa la excepción y loggea un warning). Si se
+  corrige esa dependencia faltante, hay que volver a medir: xarray + netCDF4 son
+  ~40 MB y el margen no da.
+- Salida si algún día no entra: sacar `erddapy` de `api/requirements.txt`. La app
+  importa igual (el import es tardío, dentro de `_fetch_sst`) y la estrategia
+  DB-first de `get_latest_snapshot` lee el satélite que ya persistió el servidor
+  universitario.
+
+### Pool de conexiones
+
+`app/core/database.py` elige el pool según la plataforma: con la env var `VERCEL`
+presente (la define la propia plataforma) usa `NullPool` — el contenedor se
+congela entre invocaciones, así que un pool en proceso guardaría conexiones ya
+muertas y cada instancia concurrente multiplicaría su propio pool contra el
+límite de Supabase. El pooler (pgBouncer, puerto 6543) es el que hace el pooling
+real. En el servidor universitario no cambia nada: pool por defecto con
+`pool_pre_ping`.
+
+### Pasos en el dashboard de Vercel (no se pueden versionar)
+
+1. **Settings → Environment Variables**, en los scopes **Production y Preview**:
+   `POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING`, `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`, `SENSOR_API_KEY_SECRET`, `ADMIN_API_KEY` (mismo
+   valor que el servidor universitario), `ENVIRONMENT=production`,
+   `RUN_SCHEDULER=false`. Opcional `AI_API_KEY` si se quiere `/dashboard/ai/ask`
+   desde ahí.
+   - **Preview importa:** hoy las variables están solo en Production, y por eso
+     cualquier deploy de una rama que no sea `main` devuelve 500 en *todas* las
+     requests — `Settings()` revienta al importar `app/main.py`
+     (`ValidationError`, 4 campos faltantes) y ni `/favicon.ico` responde.
+   - Con `ENVIRONMENT != development`, dejar `ADMIN_API_KEY` en `change-me` hace
+     fallar el arranque a propósito (fail-fast, ver `config.py`).
+2. **Settings → Functions → Region**: la misma región del proyecto Supabase; cada
+   request cruzando de región le suma latencia a cada query.
+3. Deploy: push a `main` (auto-deploy) o `vercel --prod` desde el repo linkeado.
+4. Verificar: `GET /health`, `GET /api/v1/data/latest`, y que el cron diario
+   aparezca en **Settings → Cron Jobs**.
+5. Confirmar que `BACKEND_URL` del frontend sigue apuntando a donde se quiere
+   (hoy: el servidor universitario). Vercel no se auto-promueve a backend del
+   dashboard.
+
+### Lo que sigue sin decidir
+
+Dos hosts sirviendo la misma API contra la misma DB sigue siendo una decisión de
+producto pendiente. Mientras siga así: cada cambio de endpoint hay que deployarlo
+en los dos, y conviene tener presente que el host que conocen Meta (webhook) y el
+firmware ESP32 (ingesta) es el servidor universitario, no Vercel.
 
 ## `RUN_SCHEDULER`
 
 `app/main.py` tiene un loop en background (`_hourly_refresh`) que refresca el
-snapshot ambiental y evalúa/envía alertas de WhatsApp. Como el backend corre
-en un único proceso persistente, `RUN_SCHEDULER=true` en producción (servidor
-universitario) y `false` por defecto en local dev (ponelo en `true` solo para
-probar el loop horario en tu máquina). El advisory lock en
+snapshot ambiental y evalúa/envía alertas de WhatsApp. Necesita un proceso
+persistente, así que `RUN_SCHEDULER=true` va solo en el servidor universitario;
+en Vercel y en local dev queda en `false` (ponelo en `true` en tu máquina solo
+para probar el loop horario). El advisory lock en
 `maybe_send_alert` (ver más abajo) protege igual contra duplicados si dos
 instancias locales llegaran a correr a la vez.
 

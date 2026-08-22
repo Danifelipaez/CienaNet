@@ -6,7 +6,7 @@ Este archivo es el punto de entrada para cualquier asistente de IA trabajando en
 Backend FastAPI para **CienRayas**, una app que entrega información ambiental de la Ciénaga Grande de Santa Marta a pescadores artesanales vía WhatsApp. Ver `/docs/CONTEXT.md` para contexto completo.
 
 ## Stack
-Desplegado en el servidor universitario. El frontend (dashboard Next.js) vive en un repo separado, `CienaRed-Frontend`, desplegado en Vercel. Ver `/docs/STACK.md` y `/docs/DEPLOYMENT.md`.
+Desplegado en el servidor universitario (webhook de WhatsApp, ingesta de sensores y scheduler de alertas) y, en paralelo, en Vercel como serverless (API de lectura + cron diario, nunca el scheduler). El frontend (dashboard Next.js) vive en un repo separado, `CienaRed-Frontend`, desplegado en Vercel. Ver `/docs/STACK.md` y `/docs/DEPLOYMENT.md`.
 
 ## Reglas que siempre aplican
 1. Validar firma HMAC en TODOS los webhooks de Meta antes de procesar

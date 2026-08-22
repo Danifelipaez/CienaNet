@@ -10,19 +10,23 @@
 - Ecosistema Python para datos (pandas, numpy) — útil cuando integremos datos satelitales
 - Curva de aprendizaje baja para el equipo (Valentina ya conoce Python)
 
-### Plataforma backend: servidor universitario
-Proceso persistente (Docker o systemd+uvicorn) — destino previsto de
-producción, recibe el webhook de Meta y corre el scheduler. Vercel se usó en
-su momento como respaldo/staging serverless (Mangum) y la decisión fue
-dejar de usarlo para el backend: sin límite de timeout por función y con
-soporte real de procesos de larga duración no hacía falta.
+### Plataforma backend: servidor universitario + Vercel
+**Servidor universitario** (Docker o systemd+uvicorn): proceso persistente, es
+el que recibe el webhook de Meta, la ingesta de los ESP32 y corre el scheduler
+horario de alertas. Sin límite de timeout por función y con soporte real de
+procesos de larga duración.
 
-**Deuda conocida:** esa decisión no se completó operativamente — `api/index.py`
-y `vercel.json` (el entry point Mangum) se borraron del repo, pero el
-proyecto Vercel del backend (`ciena-net`) nunca se desvinculó, así que sigue
-haciendo auto-deploy en cada push y sirviendo tráfico real en paralelo.
-Detalle y riesgo en [DEPLOYMENT.md](./DEPLOYMENT.md) ("Deuda: doble
-despliegue").
+**Vercel** (proyecto `ciena-net`, mismo repo): deployment serverless de la misma
+app ASGI (`api/index.py` re-exporta `app.main:app`, sin Mangum — el runtime de
+Python de Vercel sirve ASGI nativo). Cubre la API de lectura y un cron diario que
+refresca el snapshot; nunca corre el scheduler (`RUN_SCHEDULER=false`), porque
+dos loops mandando alertas serían WhatsApp duplicados a los mismos pescadores.
+
+Que el backend viva en dos lados viene de que el proyecto Vercel nunca se
+desvinculó del repo; hoy está configurado explícitamente en vez de depender de la
+autodetección de Vercel, pero sigue siendo una decisión de producto pendiente.
+Roles, límites de tamaño y pasos de dashboard en
+[DEPLOYMENT.md](./DEPLOYMENT.md) ("Vercel (segundo destino del backend)").
 
 ### Base de Datos: Supabase (PostgreSQL)
 **Por qué Supabase:**
@@ -56,6 +60,7 @@ Backend:
   PR abierto → ruff check . + pytest en GitHub Actions (instala desde
                requirements-lock.txt, versiones exactas via pip freeze)
   Servidor universitario → deploy manual (git pull + docker compose up -d --build), ver DEPLOYMENT.md
+  Push a main → Vercel auto-deploy (api/index.py + vercel.json), ver DEPLOYMENT.md
 
 Frontend (repo CienaRed-Frontend):
   Push a main → Vercel auto-deploy (producción)
@@ -154,5 +159,5 @@ CORS_ALLOWED_ORIGINS=     # Orígenes de navegador permitidos, separados por com
 | Twilio WhatsApp | Costo adicional por mensaje; somos estudiantes |
 | Firebase | Vendor lock-in, pricing impredecible |
 | MongoDB | SQL es mejor para datos de series temporales de sensores |
-| Vercel serverless para el backend | Se usó como respaldo/staging al inicio; el servidor universitario cubre producción como proceso persistente, sin límites de timeout ni necesidad de Mangum. **El proyecto Vercel sigue linkeado y deployando en la práctica** — ver deuda conocida arriba y en DEPLOYMENT.md |
+| Vercel serverless como **único** backend | El webhook de Meta, la ingesta de sensores y el scheduler de alertas necesitan un proceso persistente sin límite de timeout: eso lo cubre el servidor universitario. Vercel sí queda como segundo deployment de la API de lectura + cron diario — ver arriba y DEPLOYMENT.md |
 | Django | Demasiado framework para una API; FastAPI es suficiente |

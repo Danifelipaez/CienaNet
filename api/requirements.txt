@@ -1,0 +1,26 @@
+# Dependencias del deployment de Vercel. El runtime de Python instala este
+# archivo por estar junto al entry point (api/index.py), en vez del
+# requirements.txt de la raíz.
+#
+# Es el subconjunto de runtime de ../requirements.txt: quedan afuera las
+# herramientas de desarrollo (pytest, pytest-asyncio, ruff), el servidor local
+# (uvicorn), las migraciones (alembic + psycopg2-binary, que se corren a mano
+# contra POSTGRES_URL_NON_POOLING desde una máquina de dev) y el SDK de supabase
+# (no se importa en ningún punto de app/ — se habla con Postgres vía SQLAlchemy).
+#
+# No es solo higiene: una función serverless tiene un límite de 250 MB
+# descomprimidos y erddapy arrastra pandas + numpy (~150 MB). Con este recorte el
+# bundle queda en ~215 MB; con el requirements.txt completo se pasa del límite.
+# Ver docs/DEPLOYMENT.md.
+#
+# Los floors se mantienen sincronizados a mano con ../requirements.txt.
+fastapi>=0.115
+pydantic>=2.9
+pydantic-settings>=2.5
+sqlalchemy>=2.0
+asyncpg>=0.30
+python-dotenv>=1.0
+httpx>=0.27
+erddapy>=0.8
+feedparser>=6.0
+gsw>=3.6
