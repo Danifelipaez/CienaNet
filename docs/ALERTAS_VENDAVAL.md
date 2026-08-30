@@ -82,6 +82,46 @@ scraper no verificado.
 
 Corto, sin jerga, con acción concreta — según `docs/GUARDRAILS.md`.
 
+## Backtest contra el evento real del 29 de agosto — qué se pudo verificar
+
+Se intentó confirmar con datos reales si Open-Meteo habría disparado la alerta
+con ≥1h de anticipación para el vendaval del 29 de agosto. Resultado:
+
+- **No se pudo ejecutar el backtest** desde el entorno donde se investigó esto:
+  tanto `api.open-meteo.com` (la misma URL que ya usa `weather.py` en
+  producción) como `archive-api.open-meteo.com` y `previous-runs-api.open-meteo.com`
+  están bloqueados por la política de red de ese sandbox (mismo bloqueo que ya
+  afectaba a `ideam.gov.co` — confirmado con `curl`/`WebFetch`, ambos devuelven
+  rechazo de política, no un problema del lado de Open-Meteo). Esto es una
+  limitación del entorno de investigación, no evidencia de que la integración
+  en producción falle: el servidor universitario ya llama esa misma API con
+  éxito hoy para el clima del bot.
+- Se dejó listo `scripts/verify_vendaval_forecast_lead.py` para correr el
+  backtest real desde una máquina con salida a internet (compara la ráfaga
+  observada ese día contra lo que decían corridas de pronóstico anteriores,
+  hora por hora) — sigue el mismo patrón que `scripts/verify_alert_lock.py`
+  (script de verificación manual, no pytest).
+- **Hallazgo geográfico, este sí verificable sin llamar a la API:** el
+  vendaval reportado por medios se desplazó **desde Cesar hacia el centro del
+  Magdalena** — Tenerife, Ariguaní, Chibolo, Plato, Santa Ana, San Zenón,
+  Pijiño del Carmen, Sabanas de San Ángel, Cerro de San Antonio, Concordia,
+  Pivijay. Todos estos municipios quedan al **sur** del centroide de la CGSM
+  (10.859056, -74.460611) que es el ÚNICO punto que hoy consulta
+  `get_wind_gust_forecast()` — a ojo sobre el mapa del departamento, del orden
+  de 80-160 km de distancia según el municipio (no geocodificado con precisión,
+  ver el aviso en el script). **Implicación importante:** aunque el pronóstico
+  de Open-Meteo hubiera sido perfecto, un chequeo en un solo punto sobre la
+  CGSM no necesariamente ve lo que pasa 100+ km al sur — la alerta tal como
+  está implementada cubre la zona de pesca de la Ciénaga (que es lo que pide
+  el proyecto), no "vendaval en cualquier parte del Magdalena". No hay
+  confirmación en la prensa de que la propia CGSM/Santa Marta haya tenido
+  ráfaga de nivel vendaval ese día (sí lluvia, según un titular suelto de
+  IDEAM) — sin poder correr el backtest, no se puede afirmar si el punto CGSM
+  específicamente habría cruzado el umbral o no.
+- Tampoco se encontró en prensa la hora exacta del evento ni cuántas horas
+  antes avisó IDEAM — los titulares confirman el día (sábado 29) y que fue
+  "en las últimas horas" del día, sin más precisión.
+
 ## Pendiente
 
 - **Verificar el endpoint real de IDEAM** desde una red sin el bloqueo de este
@@ -103,3 +143,14 @@ Corto, sin jerga, con acción concreta — según `docs/GUARDRAILS.md`.
 - **DIMAR/CIOH** (avisos marítimos de la Capitanía de Puerto Santa Marta) como
   fuente complementaria específica para navegación — no investigado en esta ronda,
   candidato natural si se quiere una alerta más específica que el vendaval terrestre.
+- **Correr `scripts/verify_vendaval_forecast_lead.py`** contra el 29 de agosto desde
+  una red real (servidor universitario o cualquier máquina con internet) — es el
+  único paso que falta para responder con datos reales, no con razonamiento, si
+  Open-Meteo habría avisado con ≥1h de anticipación en el centroide CGSM.
+- **Decidir si un solo punto (centroide CGSM) es suficiente**, dado el hallazgo de
+  que este evento concreto se concentró en Magdalena central/sur, lejos de ese
+  punto. Si el objetivo es "vendaval que afecte a los pescadores de la CGSM", un
+  solo punto tiene sentido; si se quiere también anticipar sistemas que se acercan
+  desde el sur/Cesar antes de que lleguen a la Ciénaga, se necesitaría consultar
+  1-2 puntos adicionales (p.ej. Pivijay o el centro del departamento) — cambio
+  pequeño en `get_wind_gust_forecast()`/`maybe_send_wind_alert()` si se decide.
