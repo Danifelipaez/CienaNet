@@ -84,7 +84,13 @@ class CatchReport(Base):
 
 
 class AlertLog(Base):
-    """Registro de alertas enviadas a la comunidad por WhatsApp."""
+    """Registro de alertas enviadas a la comunidad por WhatsApp.
+
+    `alert_type` distingue el pipeline que generó la fila ("semaforo" | "vendaval",
+    migración 013) — necesario porque maybe_send_alert() y maybe_send_wind_alert()
+    comparten esta tabla pero cada una debe deduplicar solo contra sus propias
+    filas (ver app/services/alert_service.py).
+    """
 
     __tablename__ = "alert_log"
 
@@ -96,6 +102,7 @@ class AlertLog(Base):
     canal: Mapped[str] = mapped_column(String(20), server_default=text("'whatsapp'"))
     texto: Mapped[str] = mapped_column(Text)
     destinatarios_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    alert_type: Mapped[str | None] = mapped_column(String(20), server_default=text("'semaforo'"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

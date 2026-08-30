@@ -21,12 +21,15 @@
 │  ┌─────▼─────────────▼─────────────▼─────────────────▼───────────┐ │
 │  │                       Capa de Servicios                        │ │
 │  │  message_router · whatsapp_service · sensor_service ·          │ │
-│  │  alert_service · ai_service · dashboard_service (ESCRITURA:     │ │
-│  │  llama APIs externas + persiste) · snapshot_service (LECTURA:   │ │
-│  │  lee lo ya persistido, cero red — usado por el bot y el mapa) · │ │
-│  │  points_service · sedimentation_service · system_status_service │ │
-│  │  · semaphore · ipp · derived · trends (tendencias 24h/7d) ·     │ │
-│  │  signals (anoxia, pulso de agua dulce — estimaciones) ·         │ │
+│  │  alert_service (semáforo + vendaval) · ai_service ·            │ │
+│  │  dashboard_service (ESCRITURA: llama APIs externas +           │ │
+│  │  persiste) · snapshot_service (LECTURA: lee lo ya              │ │
+│  │  persistido, cero red — usado por el bot y el mapa) ·          │ │
+│  │  points_service · sedimentation_service ·                      │ │
+│  │  system_status_service · semaphore · ipp · derived ·           │ │
+│  │  trends (tendencias 24h/7d) · signals (anoxia, pulso           │ │
+│  │  de agua dulce — estimaciones; vendaval — umbral               │ │
+│  │  directo, ver docs/ALERTAS_VENDAVAL.md) ·                      │ │
 │  │  ingestion/{weather,satellite,alerts_ext,ideam_hidro}           │ │
 │  └──────────────────────────┬───────────────────────────────────--┘ │
 └─────────────────────────────┼────────────────────────────────------┘

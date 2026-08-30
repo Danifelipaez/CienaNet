@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     tasajera_lat: float = 10.972
     tasajera_lon: float = -74.434
 
+    # Umbral de ráfaga (km/h) para la alerta de vendaval (docs/ALERTAS_VENDAVAL.md,
+    # app/services/signals.py::vendaval_risk). 62 km/h = piso de "vendaval" en la
+    # escala Beaufort (grado 8) usada por servicios meteorológicos hispanohablantes
+    # — NO es un umbral oficial publicado por IDEAM (no se encontró uno numérico
+    # público), así que queda configurable por env var en vez de fijo en código.
+    vendaval_gust_threshold_kmh: float = 62.0
+    # Ventana de pronóstico que se revisa en cada refresco horario — cuántas horas
+    # hacia adelante se busca la ráfaga. 48h da margen para avisar "con horas de
+    # anticipación" incluso si el refresco horario se atrasa un ciclo.
+    vendaval_forecast_hours: int = 48
+
     # ERDDAP — dataset ids versionados en config, no en código:
     # pueden cambiar si NOAA/Copernicus actualizan el producto satelital.
     erddap_sst_dataset: str = "jplMURSST41"

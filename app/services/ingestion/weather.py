@@ -89,3 +89,61 @@ async def get_weather_forecast(lat: float | None = None, lon: float | None = Non
         "precipitation_mm": None,
         "origen": "sin_dato",
     }
+
+
+_forecast_cache: dict[tuple[float, float, int], dict] = {}
+
+
+async def get_wind_gust_forecast(
+    lat: float | None = None, lon: float | None = None, hours: int | None = None
+) -> dict:
+    """Retorna el pronóstico horario de ráfaga (wind_gusts_10m) para las próximas
+    `hours` horas — a diferencia de get_weather_forecast() (solo condición actual),
+    esto es lo que permite avisar de un vendaval CON anticipación (docs/ALERTAS_VENDAVAL.md),
+    no solo constatarlo cuando ya está pasando.
+
+    Mismo patrón que get_weather_forecast: cache en memoria, reintentos con
+    backoff corto, fallback a la última respuesta buena. `puntos` viene vacío
+    (nunca inventado) si la fuente falla y no hay cache.
+    """
+    lat = settings.cienaga_lat if lat is None else lat
+    lon = settings.cienaga_lon if lon is None else lon
+    hours = settings.vendaval_forecast_hours if hours is None else hours
+    key = (lat, lon, hours)
+    now = time.monotonic()
+    cached = _forecast_cache.get(key)
+    if cached and now - cached["ts"] < _TTL:
+        return cached["data"]
+
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "hourly": ["wind_gusts_10m"],
+        "forecast_days": min(16, max(1, -(-hours // 24) + 1)),  # ceil(hours/24) + 1 día de margen
+        "timezone": "America/Bogota",
+    }
+
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(_OPEN_METEO_URL, params=params)
+                resp.raise_for_status()
+            hourly = resp.json()["hourly"]
+            puntos = [
+                {"timestamp": ts, "wind_gust_kmh": gust}
+                for ts, gust in zip(hourly["time"], hourly["wind_gusts_10m"], strict=True)
+                if gust is not None
+            ][:hours]
+            result = {"puntos": puntos, "origen": "medido"}
+            _forecast_cache[key] = {"data": result, "ts": now}
+            return result
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                await asyncio.sleep(1 + attempt)
+
+    logger.warning("Pronóstico de ráfaga Open-Meteo no disponible (%s, %s): %s", lat, lon, last_exc)
+    if cached:
+        return {**cached["data"], "origen": "cache"}
+    return {"puntos": [], "origen": "sin_dato"}
