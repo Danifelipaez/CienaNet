@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def _hourly_refresh() -> None:
     # ponytail: loop solo tiene sentido en un proceso persistente (uvicorn
     # local o el servidor universitario, ver settings.run_scheduler).
-    from app.services.alert_service import maybe_send_alert
+    from app.services.alert_service import maybe_send_alert, maybe_send_wind_alert
     from app.services.dashboard_service import get_latest_snapshot
 
     while True:
@@ -25,6 +25,7 @@ async def _hourly_refresh() -> None:
             async with AsyncSessionLocal() as db:
                 snapshot = await get_latest_snapshot(db)
                 await maybe_send_alert(snapshot["semaphore"], db)
+                await maybe_send_wind_alert(snapshot["senales"]["vendaval"], db)
             logger.info("Snapshot ambiental actualizado")
         except Exception as exc:
             logger.error("Error en refresco horario: %s", exc)

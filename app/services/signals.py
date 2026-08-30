@@ -88,3 +88,25 @@ def pulso_agua_dulce(lluvia_72h_mm: float | None, salinidad_actual: float | None
         "mensaje": "Lluvia reciente en la cuenca — el agua debería entrar más dulce en 1 a 3 días.",
         "estimacion": True,
     }
+
+
+def vendaval_risk(forecast: dict, threshold_kmh: float) -> dict | None:
+    """Primera hora del pronóstico de ráfaga (get_wind_gust_forecast) que cruza
+    `threshold_kmh`, o None si no hay ninguna o la fuente no tiene dato.
+
+    A diferencia de anoxia_risk/pulso_agua_dulce, esto NO es una estimación
+    compuesta: es un umbral directo sobre un número real de Open-Meteo — el
+    umbral en sí (settings.vendaval_gust_threshold_kmh) es literatura
+    (Beaufort 8), no un dato oficial de IDEAM (ver docs/ALERTAS_VENDAVAL.md).
+    """
+    if forecast.get("origen") == "sin_dato":
+        return None
+    for punto in forecast.get("puntos", []):
+        if punto["wind_gust_kmh"] >= threshold_kmh:
+            return {
+                "timestamp": punto["timestamp"],
+                "wind_gust_kmh": punto["wind_gust_kmh"],
+                "umbral_kmh": threshold_kmh,
+                "origen": forecast["origen"],
+            }
+    return None

@@ -96,6 +96,28 @@ class SatelliteData(Base):
     )
 
 
+class ExternalAlert(Base):
+    """Alerta de una fuente externa (NOAA NHC, Open-Meteo) — tabla creada en la
+    migración 001 pero sin modelo ORM hasta ahora: `get_cyclone_alerts()` leía
+    el RSS de NOAA en vivo y nunca se persistía. Se usa para dejar rastro de
+    qué se detectó y cuándo (auditoría + dedup de `maybe_send_wind_alert`,
+    ver docs/ALERTAS_VENDAVAL.md), no como fuente de lectura del bot.
+    """
+
+    __tablename__ = "external_alerts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    alert_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class SedimentationZone(Base):
     """Zona de sedimentación (capa del mapa) — polígono + nivel de severidad.
 
