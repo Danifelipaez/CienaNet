@@ -14,4 +14,5 @@ httpx>=0.27
 erddapy>=0.8
 feedparser>=6.0
 gsw>=3.6
+h5py>=3.11
 ruff>=0.16
