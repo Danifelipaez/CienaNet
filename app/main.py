@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def _hourly_refresh() -> None:
     # ponytail: loop solo tiene sentido en un proceso persistente (uvicorn
     # local o el servidor universitario, ver settings.run_scheduler).
-    from app.services.alert_service import maybe_send_alert, maybe_send_wind_alert
+    from app.services.alert_service import maybe_send_alert
     from app.services.dashboard_service import get_latest_snapshot
 
     while True:
@@ -25,11 +25,41 @@ async def _hourly_refresh() -> None:
             async with AsyncSessionLocal() as db:
                 snapshot = await get_latest_snapshot(db)
                 await maybe_send_alert(snapshot["semaphore"], db)
-                await maybe_send_wind_alert(snapshot["senales"]["vendaval"], db)
             logger.info("Snapshot ambiental actualizado")
         except Exception as exc:
             logger.error("Error en refresco horario: %s", exc)
         await asyncio.sleep(3600)
+
+
+async def _nowcast_refresh() -> None:
+    """Nowcast de tormenta por rayos GOES-19 GLM (docs/ALERTAS_VENDAVAL.md) —
+    cadencia propia de 10 min, distinta de _hourly_refresh: el cálculo de
+    velocidad de tormenta_aproximandose() necesita instantáneas cercanas en el
+    tiempo, no una por hora.
+
+    `anterior` vive en esta misma función (variable de closure del while, como
+    ya hace este archivo) — ponytail: en memoria de proceso, un reinicio
+    pierde un ciclo; el siguiente (10 min después) la repone sin intervención.
+    """
+    from app.core.config import settings
+    from app.services.alert_service import maybe_send_storm_alert
+    from app.services.ingestion.lightning import get_lightning_flashes, set_ultimo_nowcast
+    from app.services.signals import tormenta_aproximandose
+
+    anterior: dict | None = None
+    while True:
+        try:
+            actual = await get_lightning_flashes()
+            resultado = tormenta_aproximandose(
+                anterior, actual, settings.cienaga_lat, settings.cienaga_lon, settings.nowcast_eta_max_min
+            )
+            set_ultimo_nowcast(resultado)
+            async with AsyncSessionLocal() as db:
+                await maybe_send_storm_alert(resultado, db)
+            anterior = actual
+        except Exception as exc:
+            logger.error("Error en refresco de nowcast: %s", exc)
+        await asyncio.sleep(600)
 
 
 @asynccontextmanager
@@ -43,6 +73,7 @@ async def lifespan(app: FastAPI):
         # débil a la task, así que sin guardarla el GC puede recolectarla y el
         # scheduler se detiene en silencio (sin log, sin error).
         app.state.refresh_task = asyncio.create_task(_hourly_refresh())
+        app.state.nowcast_task = asyncio.create_task(_nowcast_refresh())
     yield
 
 
