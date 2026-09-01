@@ -100,7 +100,7 @@ class ExternalAlert(Base):
     """Alerta de una fuente externa (NOAA NHC, Open-Meteo) — tabla creada en la
     migración 001 pero sin modelo ORM hasta ahora: `get_cyclone_alerts()` leía
     el RSS de NOAA en vivo y nunca se persistía. Se usa para dejar rastro de
-    qué se detectó y cuándo (auditoría + dedup de `maybe_send_wind_alert`,
+    qué se detectó y cuándo (auditoría + dedup de `maybe_send_storm_alert`,
     ver docs/ALERTAS_VENDAVAL.md), no como fuente de lectura del bot.
     """
 

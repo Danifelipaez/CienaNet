@@ -54,16 +54,32 @@ class Settings(BaseSettings):
     tasajera_lat: float = 10.972
     tasajera_lon: float = -74.434
 
-    # Umbral de ráfaga (km/h) para la alerta de vendaval (docs/ALERTAS_VENDAVAL.md,
-    # app/services/signals.py::vendaval_risk). 62 km/h = piso de "vendaval" en la
-    # escala Beaufort (grado 8) usada por servicios meteorológicos hispanohablantes
-    # — NO es un umbral oficial publicado por IDEAM (no se encontró uno numérico
-    # público), así que queda configurable por env var en vez de fijo en código.
+    # Umbral de ráfaga (km/h), uno de los factores del índice de outlook de vendaval
+    # (docs/ALERTAS_VENDAVAL.md, app/services/signals.py::vendaval_risk). 62 km/h =
+    # piso de "vendaval" en la escala Beaufort (grado 8) — NO es un umbral oficial
+    # de IDEAM, así que queda configurable por env var.
     vendaval_gust_threshold_kmh: float = 62.0
     # Ventana de pronóstico que se revisa en cada refresco horario — cuántas horas
-    # hacia adelante se busca la ráfaga. 48h da margen para avisar "con horas de
-    # anticipación" incluso si el refresco horario se atrasa un ciclo.
+    # hacia adelante se busca (get_convective_forecast). 48h da margen para el
+    # outlook incluso si el refresco horario se atrasa un ciclo.
     vendaval_forecast_hours: int = 48
+
+    # Caja del corredor de aproximación Cesar -> Magdalena centro que vigila el
+    # nowcast de rayos (app/services/ingestion/lightning.py). Backtest real del
+    # vendaval del 29-ago-2026 (docs/ALERTAS_VENDAVAL.md): el sistema que dañó
+    # Tenerife se originó cerca de la frontera con Cesar y cruzó esta caja.
+    corredor_lat_min: float = 9.0
+    corredor_lat_max: float = 11.3
+    corredor_lon_min: float = -75.3
+    corredor_lon_max: float = -73.3
+    # Minutos máximos de ETA para que tormenta_aproximandose() dispare — más allá
+    # de esto el pronóstico de trayectoria lineal es poco confiable (una tormenta
+    # real serpentea). 90 min da margen sin alertar con un día de anticipación.
+    nowcast_eta_max_min: int = 90
+    # Archivos GLM-L2-LCFA por ciclo de 10 min (cadencia real del producto: 20s,
+    # ver scripts/verify_glm_lead_29ago.py) — 3 archivos = 1 min de destellos,
+    # ~1.3 MB, suficiente para un centroide sin descargar el ciclo completo.
+    glm_files_per_ciclo: int = 3
 
     # ERDDAP — dataset ids versionados en config, no en código:
     # pueden cambiar si NOAA/Copernicus actualizan el producto satelital.
