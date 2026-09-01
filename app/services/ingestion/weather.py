@@ -94,13 +94,24 @@ async def get_weather_forecast(lat: float | None = None, lon: float | None = Non
 _forecast_cache: dict[tuple[float, float, int], dict] = {}
 
 
-async def get_wind_gust_forecast(
+_CONVECTIVE_VARS = [
+    "wind_gusts_10m",
+    "cape",
+    "lifted_index",
+    "convective_inhibition",
+    "dew_point_2m",
+    "temperature_2m",
+]
+
+
+async def get_convective_forecast(
     lat: float | None = None, lon: float | None = None, hours: int | None = None
 ) -> dict:
-    """Retorna el pronóstico horario de ráfaga (wind_gusts_10m) para las próximas
-    `hours` horas — a diferencia de get_weather_forecast() (solo condición actual),
-    esto es lo que permite avisar de un vendaval CON anticipación (docs/ALERTAS_VENDAVAL.md),
-    no solo constatarlo cuando ya está pasando.
+    """Retorna el pronóstico horario de ráfaga + variables convectivas (CAPE,
+    lifted index, CIN, punto de rocío) para las próximas `hours` horas — la base
+    del outlook de vendaval (signals.py::vendaval_risk). A diferencia de
+    get_weather_forecast() (solo condición actual), mira hacia adelante
+    (docs/ALERTAS_VENDAVAL.md).
 
     Mismo patrón que get_weather_forecast: cache en memoria, reintentos con
     backoff corto, fallback a la última respuesta buena. `puntos` viene vacío
@@ -118,7 +129,7 @@ async def get_wind_gust_forecast(
     params = {
         "latitude": lat,
         "longitude": lon,
-        "hourly": ["wind_gusts_10m"],
+        "hourly": _CONVECTIVE_VARS,
         "forecast_days": min(16, max(1, -(-hours // 24) + 1)),  # ceil(hours/24) + 1 día de margen
         "timezone": "America/Bogota",
     }
@@ -131,9 +142,16 @@ async def get_wind_gust_forecast(
                 resp.raise_for_status()
             hourly = resp.json()["hourly"]
             puntos = [
-                {"timestamp": ts, "wind_gust_kmh": gust}
-                for ts, gust in zip(hourly["time"], hourly["wind_gusts_10m"], strict=True)
-                if gust is not None
+                {
+                    "timestamp": ts,
+                    "wind_gust_kmh": hourly["wind_gusts_10m"][i],
+                    "cape": hourly["cape"][i],
+                    "lifted_index": hourly["lifted_index"][i],
+                    "convective_inhibition": hourly["convective_inhibition"][i],
+                    "dew_point_2m": hourly["dew_point_2m"][i],
+                    "temperature_2m": hourly["temperature_2m"][i],
+                }
+                for i, ts in enumerate(hourly["time"])
             ][:hours]
             result = {"puntos": puntos, "origen": "medido"}
             _forecast_cache[key] = {"data": result, "ts": now}
@@ -143,7 +161,7 @@ async def get_wind_gust_forecast(
             if attempt < 2:
                 await asyncio.sleep(1 + attempt)
 
-    logger.warning("Pronóstico de ráfaga Open-Meteo no disponible (%s, %s): %s", lat, lon, last_exc)
+    logger.warning("Pronóstico convectivo Open-Meteo no disponible (%s, %s): %s", lat, lon, last_exc)
     if cached:
         return {**cached["data"], "origen": "cache"}
     return {"puntos": [], "origen": "sin_dato"}
