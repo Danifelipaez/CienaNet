@@ -1,11 +1,12 @@
-"""Tests de app/services/alert_service.py — dedup por color/hora y el advisory
+"""Tests de app/services/alert_service.py — dedup por color/ventana y el advisory
 lock que serializa llamadas concurrentes (ver docs/DEPLOYMENT.md).
 """
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.alert_service import maybe_send_alert, maybe_send_wind_alert
+from app.services.alert_service import maybe_send_alert, maybe_send_storm_alert
 
 
 def _result(scalar=None, scalars_all=None):
@@ -84,13 +85,13 @@ def test_maybe_send_alert_filtra_dedup_por_alert_type_semaforo():
     assert "alert_type" in last_alert_query_sql
 
 
-_VENDAVAL = {"timestamp": "2026-08-30T14:00", "wind_gust_kmh": 65.0, "umbral_kmh": 62.0, "origen": "medido"}
+_TORMENTA = {"eta_min": 45, "rumbo": "sur", "distancia_km": 30.5, "n_descargas": 120}
 
 
-def _make_wind_db(last_alert_hora, recipients):
-    """1ª llamada a execute() = advisory lock, 2ª = último AlertLog tipo vendaval,
-    3ª = recipients (mismo orden que _make_db, para maybe_send_wind_alert)."""
-    last = MagicMock(zonas=last_alert_hora) if last_alert_hora else None
+def _make_storm_db(last_created_at, recipients):
+    """1ª llamada a execute() = advisory lock, 2ª = último AlertLog tipo tormenta,
+    3ª = recipients (mismo orden que _make_db, para maybe_send_storm_alert)."""
+    last = MagicMock(created_at=last_created_at) if last_created_at else None
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[MagicMock(), _result(scalar=last), _result(scalars_all=recipients)]
@@ -99,56 +100,59 @@ def _make_wind_db(last_alert_hora, recipients):
     return db
 
 
-def test_vendaval_none_no_consulta_ni_bloquea():
+def test_tormenta_none_no_consulta_ni_bloquea():
     db = AsyncMock()
     db.execute = AsyncMock()
 
-    asyncio.run(maybe_send_wind_alert(None, db))
+    asyncio.run(maybe_send_storm_alert(None, db))
 
     db.execute.assert_not_awaited()
 
 
-def test_vendaval_misma_hora_no_reenvia():
-    db = _make_wind_db(last_alert_hora="2026-08-30T14:00", recipients=[])
+def test_tormenta_dentro_de_la_ventana_de_dedup_no_reenvia():
+    reciente = datetime.now(UTC) - timedelta(minutes=30)
+    db = _make_storm_db(last_created_at=reciente, recipients=[])
 
-    asyncio.run(maybe_send_wind_alert(_VENDAVAL, db))
+    asyncio.run(maybe_send_storm_alert(_TORMENTA, db))
 
     db.add.assert_not_called()
     db.commit.assert_awaited_once()
 
 
-def test_vendaval_hora_nueva_envia_y_registra():
+def test_tormenta_fuera_de_la_ventana_envia_y_registra():
+    # El ETA cambia cada ciclo de 10 min aunque sea el mismo sistema — el dedup
+    # es por ventana de tiempo, no por comparar el ETA exacto contra el último.
+    antigua = datetime.now(UTC) - timedelta(hours=5)
     user = MagicMock(wa_id="+570000000")
-    db = _make_wind_db(last_alert_hora="2026-08-30T08:00", recipients=[user])
+    db = _make_storm_db(last_created_at=antigua, recipients=[user])
 
     with patch(
         "app.services.whatsapp_service.send_template_message",
         new_callable=AsyncMock,
         return_value=True,
     ) as mock_send:
-        asyncio.run(maybe_send_wind_alert(_VENDAVAL, db))
+        asyncio.run(maybe_send_storm_alert(_TORMENTA, db))
 
     mock_send.assert_awaited_once()
     assert db.add.call_count == 2  # ExternalAlert + AlertLog
 
     external_alert, alert_log = (call.args[0] for call in db.add.call_args_list)
-    assert external_alert.alert_type == "vendaval"
-    assert external_alert.source == "open-meteo"
-    assert alert_log.alert_type == "vendaval"
-    assert alert_log.zonas == "2026-08-30T14:00"
+    assert external_alert.alert_type == "tormenta"
+    assert external_alert.source == "goes19-glm"
+    assert alert_log.alert_type == "tormenta"
     assert alert_log.destinatarios_count == 1
     db.commit.assert_awaited_once()
 
 
-def test_vendaval_sin_alerta_previa_envia():
+def test_tormenta_sin_alerta_previa_envia():
     user = MagicMock(wa_id="+570000000")
-    db = _make_wind_db(last_alert_hora=None, recipients=[user])
+    db = _make_storm_db(last_created_at=None, recipients=[user])
 
     with patch(
         "app.services.whatsapp_service.send_template_message",
         new_callable=AsyncMock,
         return_value=True,
     ):
-        asyncio.run(maybe_send_wind_alert(_VENDAVAL, db))
+        asyncio.run(maybe_send_storm_alert(_TORMENTA, db))
 
     assert db.add.call_count == 2

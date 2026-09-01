@@ -102,7 +102,7 @@ def test_fallback_a_cache_marca_origen_cache():
 
 def _fake_client_hourly(*, hourly: dict):
     """Mismo patrón que _fake_client pero con la forma de respuesta `hourly`
-    (get_wind_gust_forecast) en vez de `current`."""
+    (get_convective_forecast) en vez de `current`."""
     resp = MagicMock()
     resp.raise_for_status = MagicMock()
     resp.json = MagicMock(return_value={"hourly": hourly})
@@ -116,35 +116,46 @@ def _fake_client_hourly(*, hourly: dict):
     return factory, client
 
 
-def test_get_wind_gust_forecast_devuelve_puntos_medidos():
-    hourly = {
-        "time": ["2026-08-30T10:00", "2026-08-30T11:00"],
-        "wind_gusts_10m": [20.0, 65.0],
+def _hourly_convectivo(n: int) -> dict:
+    """Fixture con las 6 variables que pide get_convective_forecast, todas
+    con `n` puntos horarios (valores arbitrarios pero presentes)."""
+    return {
+        "time": [f"2026-08-30T{h:02d}:00" for h in range(n)],
+        "wind_gusts_10m": [20.0 + h for h in range(n)],
+        "cape": [1000.0 + h * 100 for h in range(n)],
+        "lifted_index": [-2.0] * n,
+        "convective_inhibition": [50.0] * n,
+        "dew_point_2m": [20.0] * n,
+        "temperature_2m": [30.0] * n,
     }
+
+
+def test_get_convective_forecast_devuelve_puntos_medidos():
+    hourly = _hourly_convectivo(2)
+    hourly["wind_gusts_10m"] = [20.0, 65.0]
     factory, client = _fake_client_hourly(hourly=hourly)
     with patch.object(weather.httpx, "AsyncClient", factory):
-        out = asyncio.run(weather.get_wind_gust_forecast(1.0, 2.0, hours=24))
+        out = asyncio.run(weather.get_convective_forecast(1.0, 2.0, hours=24))
 
     assert out["origen"] == "medido"
-    assert out["puntos"] == [
-        {"timestamp": "2026-08-30T10:00", "wind_gust_kmh": 20.0},
-        {"timestamp": "2026-08-30T11:00", "wind_gust_kmh": 65.0},
-    ]
+    assert out["puntos"][0]["timestamp"] == "2026-08-30T00:00"
+    assert out["puntos"][1]["wind_gust_kmh"] == 65.0
+    assert out["puntos"][0]["cape"] == 1000.0
+    assert out["puntos"][0]["lifted_index"] == -2.0
+    assert out["puntos"][0]["convective_inhibition"] == 50.0
+    assert out["puntos"][0]["dew_point_2m"] == 20.0
+    assert out["puntos"][0]["temperature_2m"] == 30.0
 
 
-def test_get_wind_gust_forecast_trunca_a_hours():
-    hourly = {
-        "time": [f"2026-08-30T{h:02d}:00" for h in range(5)],
-        "wind_gusts_10m": [10.0, 11.0, 12.0, 13.0, 14.0],
-    }
-    factory, _ = _fake_client_hourly(hourly=hourly)
+def test_get_convective_forecast_trunca_a_hours():
+    factory, _ = _fake_client_hourly(hourly=_hourly_convectivo(5))
     with patch.object(weather.httpx, "AsyncClient", factory):
-        out = asyncio.run(weather.get_wind_gust_forecast(1.0, 2.0, hours=3))
+        out = asyncio.run(weather.get_convective_forecast(1.0, 2.0, hours=3))
 
     assert len(out["puntos"]) == 3
 
 
-def test_get_wind_gust_forecast_sin_cache_no_inventa_dato():
+def test_get_convective_forecast_sin_cache_no_inventa_dato():
     client_that_raises = MagicMock()
     client_that_raises.get = AsyncMock(side_effect=Exception("boom"))
     ctx = MagicMock()
@@ -154,16 +165,15 @@ def test_get_wind_gust_forecast_sin_cache_no_inventa_dato():
         patch.object(weather.httpx, "AsyncClient", MagicMock(return_value=ctx)),
         patch.object(weather.asyncio, "sleep", AsyncMock()),
     ):
-        out = asyncio.run(weather.get_wind_gust_forecast(9.0, 6.0, hours=24))
+        out = asyncio.run(weather.get_convective_forecast(9.0, 6.0, hours=24))
 
     assert out == {"puntos": [], "origen": "sin_dato"}
 
 
-def test_get_wind_gust_forecast_fallback_a_cache():
-    hourly = {"time": ["2026-08-30T10:00"], "wind_gusts_10m": [70.0]}
-    ok_factory, _ = _fake_client_hourly(hourly=hourly)
+def test_get_convective_forecast_fallback_a_cache():
+    ok_factory, _ = _fake_client_hourly(hourly=_hourly_convectivo(1))
     with patch.object(weather.httpx, "AsyncClient", ok_factory):
-        asyncio.run(weather.get_wind_gust_forecast(3.33, 3.33, hours=24))
+        asyncio.run(weather.get_convective_forecast(3.33, 3.33, hours=24))
 
     client_that_raises = MagicMock()
     client_that_raises.get = AsyncMock(side_effect=Exception("boom"))
@@ -175,7 +185,7 @@ def test_get_wind_gust_forecast_fallback_a_cache():
         patch.object(weather.httpx, "AsyncClient", MagicMock(return_value=ctx)),
         patch.object(weather.asyncio, "sleep", AsyncMock()),
     ):
-        out = asyncio.run(weather.get_wind_gust_forecast(3.33, 3.33, hours=24))
+        out = asyncio.run(weather.get_convective_forecast(3.33, 3.33, hours=24))
 
     assert out["origen"] == "cache"
-    assert out["puntos"][0]["wind_gust_kmh"] == 70.0
+    assert out["puntos"][0]["wind_gust_kmh"] == 20.0

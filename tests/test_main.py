@@ -1,8 +1,9 @@
 """Tests del gate de scheduler (RUN_SCHEDULER) en app.main.lifespan.
 
 RUN_SCHEDULER controla si esta instancia agenda _hourly_refresh() (loop que
-refresca el snapshot y evalúa/envía alertas). Debe quedar en False en todos
-los deployments salvo el servidor universitario (ver docs/DEPLOYMENT.md).
+refresca el snapshot y evalúa/envía alertas) y _nowcast_refresh() (loop de 10
+min del nowcast de tormenta). Debe quedar en False en todos los deployments
+salvo el servidor universitario (ver docs/DEPLOYMENT.md).
 """
 
 import asyncio
@@ -30,4 +31,4 @@ def test_lifespan_agenda_refresh_si_run_scheduler_es_true(monkeypatch):
     monkeypatch.setattr(main_module.settings, "run_scheduler", True)
     with patch("app.main.asyncio.create_task") as mock_create_task:
         _run_lifespan_once()
-    mock_create_task.assert_called_once()
+    assert mock_create_task.call_count == 2  # _hourly_refresh + _nowcast_refresh

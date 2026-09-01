@@ -1,7 +1,7 @@
 """Tests de app/services/signals.py — señales compuestas, siempre marcadas como
 estimación (no medición)."""
 
-from app.services.signals import anoxia_risk, pulso_agua_dulce, vendaval_risk
+from app.services.signals import anoxia_risk, pulso_agua_dulce, tormenta_aproximandose, vendaval_risk
 
 
 def test_anoxia_alto_con_floracion_calor_y_calma():
@@ -50,24 +50,105 @@ def test_pulso_sobre_umbral_es_direccional_no_cuantificado():
 
 
 def test_vendaval_sin_dato_no_opina():
-    assert vendaval_risk({"puntos": [], "origen": "sin_dato"}, 62.0) is None
+    result = vendaval_risk({"puntos": [], "origen": "sin_dato"}, 62.0)
+    assert result == {"nivel": None, "estimacion": True}
 
 
-def test_vendaval_bajo_umbral_no_alerta():
-    forecast = {"puntos": [{"timestamp": "2026-08-30T10:00", "wind_gust_kmh": 30.0}], "origen": "medido"}
-    assert vendaval_risk(forecast, 62.0) is None
-
-
-def test_vendaval_sobre_umbral_devuelve_primera_hora():
+def test_vendaval_condiciones_tranquilas_da_bajo():
+    # CGSM el 29-ago-2026 real (docs/ALERTAS_VENDAVAL.md): CIN alto (capa marina
+    # con tapa), poca sequedad sub-nube, ráfaga lejos del umbral — 0/6 días de
+    # backtest dispararon con este perfil.
     forecast = {
         "puntos": [
-            {"timestamp": "2026-08-30T10:00", "wind_gust_kmh": 40.0},
-            {"timestamp": "2026-08-30T14:00", "wind_gust_kmh": 65.0},
-            {"timestamp": "2026-08-30T15:00", "wind_gust_kmh": 80.0},
+            {
+                "timestamp": "2026-08-29T14:00",
+                "wind_gust_kmh": 10.0,
+                "cape": 500.0,
+                "convective_inhibition": 200.0,
+                "temperature_2m": 30.0,
+                "dew_point_2m": 25.0,
+            }
         ],
         "origen": "medido",
     }
     result = vendaval_risk(forecast, 62.0)
-    assert result["timestamp"] == "2026-08-30T14:00"
-    assert result["wind_gust_kmh"] == 65.0
-    assert result["umbral_kmh"] == 62.0
+    assert result["nivel"] == "bajo"
+    assert result["estimacion"] is True
+
+
+def test_vendaval_condiciones_extremas_da_alto():
+    # Chibolo el 29-ago-2026 real: CAPE 3700, CIN 0, T-Td 19.3°C — el día que sí
+    # tumbó árboles y casas (docs/ALERTAS_VENDAVAL.md, Parte 1).
+    forecast = {
+        "puntos": [
+            {
+                "timestamp": "2026-08-29T14:00",
+                "wind_gust_kmh": 20.0,
+                "cape": 3700.0,
+                "convective_inhibition": 0.0,
+                "temperature_2m": 33.0,
+                "dew_point_2m": 13.7,
+            }
+        ],
+        "origen": "medido",
+    }
+    result = vendaval_risk(forecast, 62.0)
+    assert result["nivel"] == "alto"
+
+
+def test_vendaval_sin_ningun_factor_no_opina():
+    forecast = {"puntos": [{"timestamp": "2026-08-29T14:00"}], "origen": "medido"}
+    result = vendaval_risk(forecast, 62.0)
+    assert result == {"nivel": None, "estimacion": True}
+
+
+_CGSM = (10.859056, -74.460611)
+
+
+def _destello(lat, lon, timestamp):
+    return {"lat": lat, "lon": lon, "timestamp": timestamp}
+
+
+def test_tormenta_sin_instantanea_previa_no_opina():
+    actual = {"flashes": [_destello(0.0, 1.0, "2026-08-29T18:00:00+00:00")] * 5}
+    assert tormenta_aproximandose(None, actual, *_CGSM, 90) is None
+
+
+def test_tormenta_sin_suficientes_destellos_no_opina():
+    anterior = {"flashes": [_destello(0.0, 1.0, "2026-08-29T18:00:00+00:00")] * 2}
+    actual = {"flashes": [_destello(0.0, 0.5, "2026-08-29T18:10:00+00:00")] * 2}
+    assert tormenta_aproximandose(anterior, actual, *_CGSM, 90) is None
+
+
+def test_tormenta_que_se_aleja_no_opina():
+    anterior = {"flashes": [_destello(*_CGSM, "2026-08-29T18:00:00+00:00")] * 5}
+    # 1 grado de longitud más lejos del centro que la instantánea anterior
+    lejos = (_CGSM[0], _CGSM[1] + 1.0)
+    actual = {"flashes": [_destello(*lejos, "2026-08-29T18:10:00+00:00")] * 5}
+    assert tormenta_aproximandose(anterior, actual, *_CGSM, 90) is None
+
+
+def test_tormenta_acercandose_con_eta_dentro_del_maximo():
+    lejos = (_CGSM[0], _CGSM[1] + 1.0)
+    medio = (_CGSM[0], _CGSM[1] + 0.5)
+    anterior = {"flashes": [_destello(*lejos, "2026-08-29T18:00:00+00:00")] * 5}
+    actual = {"flashes": [_destello(*medio, "2026-08-29T18:10:00+00:00")] * 5}
+
+    result = tormenta_aproximandose(anterior, actual, *_CGSM, 90)
+
+    assert result is not None
+    assert result["eta_min"] > 0
+    assert result["distancia_km"] > 0
+    assert result["n_descargas"] == 5
+    assert result["rumbo"] in {
+        "norte", "noreste", "este", "sureste", "sur", "suroeste", "oeste", "noroeste",
+    }
+
+
+def test_tormenta_acercandose_muy_lento_supera_eta_maximo():
+    lejos = (_CGSM[0], _CGSM[1] + 1.0)
+    apenas_mas_cerca = (_CGSM[0], _CGSM[1] + 0.999)
+    anterior = {"flashes": [_destello(*lejos, "2026-08-29T18:00:00+00:00")] * 5}
+    actual = {"flashes": [_destello(*apenas_mas_cerca, "2026-08-29T18:10:00+00:00")] * 5}
+
+    assert tormenta_aproximandose(anterior, actual, *_CGSM, 90) is None
