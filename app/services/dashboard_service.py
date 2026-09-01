@@ -23,7 +23,8 @@ from app.services.dashboard_persistence import (
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
 from app.services.ingestion.ideam_hidro import get_nivel_historia, get_precipitacion_historia
 from app.services.ingestion.satellite import get_satellite_data
-from app.services.ingestion.weather import get_weather_forecast, get_wind_gust_forecast
+from app.services.ingestion.lightning import get_ultimo_nowcast
+from app.services.ingestion.weather import get_convective_forecast, get_weather_forecast
 from app.services.ipp import rank_zones
 from app.services.semaphore import evaluate
 from app.services.sensor_service import aggregate_sensor_readings, get_latest_readings
@@ -76,19 +77,19 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
                 "chlorophyll_mgm3": "medido" if db_satellite.chlorophyll_mgm3 is not None else "sin_dato",
             },
         }
-        weather_data, tasajera_weather, alerts, wind_forecast = await asyncio.gather(
+        weather_data, tasajera_weather, alerts, convective_forecast = await asyncio.gather(
             get_weather_forecast(),
             tasajera_task,
             get_cyclone_alerts(),
-            get_wind_gust_forecast(),
+            get_convective_forecast(),
         )
     else:
-        weather_data, tasajera_weather, satellite_data, alerts, wind_forecast = await asyncio.gather(
+        weather_data, tasajera_weather, satellite_data, alerts, convective_forecast = await asyncio.gather(
             get_weather_forecast(),
             tasajera_task,
             get_satellite_data(),
             get_cyclone_alerts(),
-            get_wind_gust_forecast(),
+            get_convective_forecast(),
         )
 
     # "origen" viaja dentro de cada dict de ingesta (medido/cache/baseline/sin_dato)
@@ -141,20 +142,24 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     # guardar. Cero llamadas de red — agrega sobre lo que ya está en DB.
     tendencias = await get_trends(db)
 
-    # Señales compuestas (ver app/services/signals.py). anoxia/pulso_agua_dulce son
-    # ESTIMACIONES (combinan varias fuentes con umbrales no validados) — solo
-    # dashboard por ahora: el riesgo de un falso positivo (día de pesca perdido,
-    # credibilidad quemada) es asimétrico frente al de un falso negativo. El bot
-    # tiene el mecanismo listo (condicion_message._ANOXIA_EN_BOT) pero apagado.
-    # vendaval es distinto: umbral directo sobre un número real de Open-Meteo, sin
-    # combinar fuentes — por eso sí dispara WhatsApp (maybe_send_wind_alert, ver
-    # app/main.py y docs/ALERTAS_VENDAVAL.md).
+    # Señales compuestas (ver app/services/signals.py). anoxia/pulso_agua_dulce/
+    # vendaval son ESTIMACIONES (combinan varias fuentes con umbrales no
+    # validados) — solo dashboard, nunca disparan WhatsApp por sí solas: el
+    # riesgo de un falso positivo (día de pesca perdido, credibilidad quemada)
+    # es asimétrico frente al de un falso negativo. vendaval en particular
+    # reemplazó un umbral directo de ráfaga que el backtest del 29-ago-2026
+    # mostró que no habría disparado (docs/ALERTAS_VENDAVAL.md) — el push real
+    # de vendaval ahora es tormenta (nowcast por rayos, ver `tormenta` abajo),
+    # calculado cada 10 min por app/main.py::_nowcast_refresh, no acá (esta
+    # función también la llama GET /data/latest bajo demanda, y el nowcast
+    # necesita una cadencia fija de 10 min para su cálculo de velocidad).
     senales = {
         "anoxia": anoxia_risk(satellite_data, weather_data, water),
         "pulso_agua_dulce": pulso_agua_dulce(
             tendencias.get("lluvia_72h_mm"), water.get("salinity_psu")
         ),
-        "vendaval": vendaval_risk(wind_forecast, settings.vendaval_gust_threshold_kmh),
+        "vendaval": vendaval_risk(convective_forecast, settings.vendaval_gust_threshold_kmh),
+        "tormenta": get_ultimo_nowcast(),
     }
 
     return {

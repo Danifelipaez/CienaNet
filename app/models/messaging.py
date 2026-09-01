@@ -86,10 +86,12 @@ class CatchReport(Base):
 class AlertLog(Base):
     """Registro de alertas enviadas a la comunidad por WhatsApp.
 
-    `alert_type` distingue el pipeline que generó la fila ("semaforo" | "vendaval",
-    migración 013) — necesario porque maybe_send_alert() y maybe_send_wind_alert()
-    comparten esta tabla pero cada una debe deduplicar solo contra sus propias
-    filas (ver app/services/alert_service.py).
+    `alert_type` distingue el pipeline que generó la fila ("semaforo" | "tormenta",
+    migración 013 — "vendaval" también aparece en filas históricas de la versión
+    anterior de esta alerta, ver docs/ALERTAS_VENDAVAL.md) — necesario porque
+    maybe_send_alert() y maybe_send_storm_alert() comparten esta tabla pero cada
+    una debe deduplicar solo contra sus propias filas (ver
+    app/services/alert_service.py).
     """
 
     __tablename__ = "alert_log"
