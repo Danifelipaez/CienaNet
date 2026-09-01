@@ -176,7 +176,7 @@ Meta solo permite enviar mensajes `text` o `interactive` dentro de las **24 hora
 - `alerta_salinidad` — cuando conductividad supera X
 - `alerta_temperatura` — cuando temperatura supera X
 - `alerta_condicion` — cambio de color del semáforo (`app/services/alert_service.py::maybe_send_alert`)
-- `alerta_vendaval` — ráfaga de viento pronosticada por encima del umbral (`maybe_send_wind_alert`, ver `docs/ALERTAS_VENDAVAL.md`)
+- `alerta_tormenta` — tormenta detectada acercándose por nowcast de rayos (`maybe_send_storm_alert`, ver `docs/ALERTAS_VENDAVAL.md`)
 - `bienvenida` — cuando un nuevo pescador escribe por primera vez
 
 ---

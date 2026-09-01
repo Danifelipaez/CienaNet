@@ -1,156 +1,130 @@
-# Alerta de vendaval — fuentes investigadas e implementación
+# Alertas de vendaval/tormenta — dos niveles, backtest real contra el 29-ago-2026
 
-**Estado:** implementado (umbral sobre pronóstico Open-Meteo) · fuente oficial IDEAM
-pendiente de verificación de endpoint con red real (ver "Pendiente" abajo).
+**Estado:** implementado y verificado contra datos reales de un evento real.
 **Origen:** vendaval real del 29-30 de agosto de 2026 en el Magdalena (Chibolo,
 Concordia, Plato, San Zenón, Santa Ana, Sabanas de San Ángel, Cerro de San Antonio,
 Pivijay, Pijiño del Carmen, Ariguaní, Tenerife — caída de árboles, cortes de energía,
 ~30 viviendas y un colegio afectados en Tenerife), reportado por medios horas antes
-de que tocara tierra. Pregunta original: ¿de dónde se puede sacar esa alerta para
-avisar a los pescadores con anticipación, igual que hicieron los medios?
+de que tocara tierra.
 
-## Fuentes investigadas
+Una primera versión de esta alerta (umbral directo sobre la ráfaga pronosticada de
+Open-Meteo) se implementó sin poder correr el backtest — el entorno donde se
+investigó tenía la red bloqueada. En una sesión posterior sí hubo red real, se corrió
+el backtest, y el resultado fue que **esa primera versión no habría disparado el
+29-ago-2026**. Este documento describe el diseño que la reemplazó.
 
-| Fuente | Qué ofrece | Formato | Estado |
-|---|---|---|---|
-| [IDEAM — Datos abiertos de alertas](http://www.pronosticosyalertas.gov.co/en/datos-de-alertas) | Alertas por municipio: fenómeno (incluye vendaval), nivel, municipio, departamento, región, fecha/hora inicio-fin, sinopsis | Descarga CSV/TXT (portal con selector, no confirmado como endpoint REST/JSON) | Reachable: **no verificado** — dominio bloqueado por el proxy de egress de este entorno de investigación |
-| [IDEAM — Boletines, avisos y alertas](http://www.pronosticosyalertas.gov.co/en/boletines-avisos-y-alertas) | Boletines técnicos diarios (BADT deslizamientos, BAH hidrológico, etc.) | Boletines PDF/web, no dataset estructurado | No verificado (mismo dominio bloqueado) |
-| [IDEAM — Datos abiertos de pronóstico del tiempo](http://www.pronosticosyalertas.gov.co/en/datos-abiertos-ideam) | Pronóstico por municipio: viento (velocidad/dirección), presión, precipitación, 3h a 8 días | CSV/TXT | No verificado (mismo dominio) |
-| IDEAM Socrata (`datos.gov.co`) — mismo backend que ya usa `ideam_hidro.py` | Estaciones/variables hidrometeorológicas (lluvia, nivel de río, temperatura) | JSON, sin auth, ya verificado en este proyecto (`docs/IDEAM_GBIF_VALIDACION.md`) | **No tiene** dataset de avisos/alertas por fenómeno — se buscó explícitamente, no aparece en el catálogo Socrata |
-| **Open-Meteo** (`api.open-meteo.com`) | Pronóstico horario de ráfaga de viento (`wind_gusts_10m`), hasta 16 días | JSON, sin auth | ✅ Ya integrado en el proyecto (`app/services/ingestion/weather.py`) para clima actual — **esta es la fuente que se usó para implementar la alerta** |
-| DIMAR/CIOH (Capitanía de Puerto Santa Marta) — avisos marítimos | Viento/oleaje específico para navegación | No investigado | Candidato a futuro, ver "Pendiente" |
+## Por qué la versión anterior no servía (verificado con datos reales)
 
-## Por qué se implementó con Open-Meteo y no con el CSV de IDEAM
+`vendaval_risk()` disparaba si el pronóstico horario de `wind_gusts_10m` en el
+centroide CGSM cruzaba 62 km/h. Ráfaga real pronosticada ese día en ese punto:
 
-El servicio de "Datos abiertos de alertas" de IDEAM es, según toda la documentación
-pública encontrada, un **portal de descarga CSV/TXT con selector** (fenómeno,
-municipio, departamento, rango de fechas) — no se encontró un endpoint JSON/REST
-documentado, a diferencia de:
-- el RSS de NOAA NHC que ya usa `alerts_ext.py::get_cyclone_alerts()`, o
-- el propio backend Socrata de IDEAM (`s54a-sgyg`, `bdmn-sqnh`) que ya usa
-  `ideam_hidro.py`, verificado con `curl` real (`docs/IDEAM_GBIF_VALIDACION.md`).
+| Corrida | Ráfaga máx pronosticada |
+|---|---|
+| Emitida 2 días antes | 20,5 km/h |
+| Emitida 1 día antes | 21,6 km/h |
+| Mejor análisis (re-análisis) | 42,5 km/h |
+| **Umbral configurado** | **62,0 km/h** |
 
-Desde este entorno de investigación, tanto `ideam.gov.co` como
-`pronosticosyalertas.gov.co` están bloqueados por el proxy de egress — no fue
-posible confirmar con `curl`/`WebFetch` la URL exacta de descarga ni sus parámetros.
-Siguiendo la misma disciplina que ya usa este repo (nunca integrar una URL sin
-verificarla primero — ver el propio `IDEAM_GBIF_VALIDACION.md`), no se hardcodeó
-un scraper contra una URL adivinada.
+Nunca cruzó el umbral, en ningún punto del Magdalena ese día. Peor: el 30-ago (un
+día sin vendaval reportado) el re-análisis dio 55,1 km/h en Tenerife — más alto que
+el día que tumbó 30 casas. `wind_gusts_10m` de un modelo global no tiene destreza
+para un *downburst* (corriente descendente de una tormenta): es de escala sub-malla,
+la parametrización de ráfaga no lo ve.
 
-En cambio, se implementó una alerta **igual de real y con anticipación real**
-usando una fuente que este mismo proyecto ya integró y verificó: el pronóstico
-horario de ráfaga de Open-Meteo. Como el pronóstico mira hacia adelante (hasta 48h,
-configurable), el scheduler horario (`app/main.py::_hourly_refresh`) puede detectar
-una ráfaga por encima del umbral **antes** de que ocurra — el mismo efecto de
-"avisaron horas antes" que lograron los medios el 29 de agosto, sin depender de un
-scraper no verificado.
+Bajar el umbral tampoco funciona: un índice ambiental (CAPE≥1500 + CIN≤50 +
+T−Td≥12°C) sobre 6 días de backtest dispara 4/6 días en Chibolo/Tenerife (temporada
+de lluvias, convección diaria tierra adentro) y 0/6 en la CGSM. Es buen
+discriminador geográfico — por eso sobrevive como *outlook* de dashboard — pero un
+push diario tierra adentro mataría la confianza del pescador por fatiga de alerta.
 
-## Qué se implementó
+## Diseño: dos niveles
 
-1. **`app/services/ingestion/weather.py::get_wind_gust_forecast()`** — pronóstico
-   horario de `wind_gusts_10m` para las próximas N horas (`settings.vendaval_forecast_hours`,
-   default 48h). Mismo patrón que el resto de `ingestion/`: cache en memoria, reintentos
-   con backoff, fallback a la última respuesta buena, nunca inventa un valor si la
-   fuente falla (`origen: "sin_dato"`).
-2. **`app/services/signals.py::vendaval_risk()`** — función pura: primera hora del
-   pronóstico que cruza `settings.vendaval_gust_threshold_kmh` (default 62 km/h,
-   piso de "vendaval" en escala Beaufort grado 8 — **no es un número oficial de
-   IDEAM**, no se encontró uno publicado; queda configurable por env var para que el
-   equipo lo ajuste si consigue uno). A diferencia de `anoxia_risk`/`pulso_agua_dulce`,
-   no es una estimación compuesta — es un umbral directo sobre un dato real.
-3. **`app/models/environmental.py::ExternalAlert`** — la tabla `external_alerts` existe
-   desde la migración 001 (pensada para "NOAA NHC, IDEAM" según `ARCHITECTURE.md`) pero
-   nunca tuvo modelo ORM ni se escribía; ahora persiste cada alerta de vendaval
-   disparada (auditoría — no la lee el bot, cero red desde el bot).
-4. **`app/models/messaging.py::AlertLog.alert_type`** (migración 013) — hasta ahora
-   `alert_log` solo tenía alertas de semáforo; se agregó esta columna para que
-   `maybe_send_wind_alert()` pueda compartir la misma tabla de auditoría sin romper
-   el dedup existente de `maybe_send_alert()` (que ahora filtra `alert_type='semaforo'`).
-5. **`app/services/alert_service.py::maybe_send_wind_alert()`** — mismo patrón que
-   `maybe_send_alert`: advisory lock propio, dedup (no reenvía si la hora pronosticada
-   no cambió desde la última alerta), envía WhatsApp a `users.alertas_activas=True`
-   vía template `alerta_vendaval` (⚠️ **falta crear y aprobar este template en Meta
-   Business Manager**, mismo pendiente operativo que ya tenía `alerta_condicion`).
-6. Enganchado en `app/main.py::_hourly_refresh()`, después de la alerta de semáforo.
-7. Expuesto en el dashboard como `senales.vendaval` (`GET /data/latest`), igual que
-   `senales.anoxia`/`senales.pulso_agua_dulce`.
+```
+Nivel 1 — OUTLOOK (24-48h)   → dashboard, SIN push. "condiciones favorables".
+Nivel 2 — NOWCAST (≥1h)      → push WhatsApp. Sistema real detectado, en movimiento.
+```
+
+### Nivel 1 — Outlook (`signals.py::vendaval_risk`)
+
+Índice ambiental sobre `ingestion/weather.py::get_convective_forecast()` (CAPE,
+lifted index, CIN, punto de rocío, temperatura, ráfaga — mismo patrón de cache/
+reintentos que el resto de `ingestion/`). Nunca dispara WhatsApp: solo alimenta
+`GET /data/latest` → `senales.vendaval`, con `"nivel": "bajo"|"medio"|"alto"` y
+`"estimacion": true`.
+
+### Nivel 2 — Nowcast por rayos (`signals.py::tormenta_aproximandose`)
+
+Fuente: **GOES-19 GLM** (mapeador de rayos), bucket público `noaa-goes19` en AWS S3,
+sin auth. De las fuentes evaluadas para nowcasting es la única con cobertura real
+sobre la Ciénaga y con archivos históricos disponibles para backtest:
+
+| Fuente | Estado |
+|---|---|
+| **GOES-19 GLM** | ✅ Elegida — sin auth, ~350 KB por archivo cada 20s, HDF5 real (confirmado con `xxd`, firma `89 48 44 46`), `h5py` los abre sin depender de `netCDF4`. |
+| Radar compuesto IDEAM | Bucket accesible, pero sin cobertura de radar sobre la CGSM ni el Magdalena central (red interior: Munchique, Barrancabermeja, Tablazo...). Descartado. |
+| GOES-19 ABI (`ABI-L2-MCMIPF`) | Accesible, cada 10 min, pero mucho más pesado que GLM para el mismo propósito. |
+| NOAA NESDIS (JPEG geoestacionario) | El CDN solo guarda ~2 días — no permite backtest. Descartado. |
+| IDEAM Socrata (viento, alertas) | Sin estaciones en el Caribe / sin dataset de vendaval. Descartado. |
+
+`ingestion/lightning.py::get_lightning_flashes()` descarga los últimos
+`settings.glm_files_per_ciclo` archivos GLM-L2-LCFA (~1 min de destellos, ~1 MB),
+los filtra a la caja del corredor (`settings.corredor_lat/lon_min/max`: Cesar →
+Magdalena centro) y devuelve `{lat, lon, timestamp}` por destello.
+
+`signals.py::tormenta_aproximandose(anterior, actual, ...)` compara dos
+instantáneas (~10 min aparte): calcula el centroide de cada una, ve si se está
+acercando al centro de la CGSM, y si sí, proyecta un ETA lineal. Si
+`eta_min <= settings.nowcast_eta_max_min` (default 90), es accionable — este SÍ
+dispara WhatsApp vía `alert_service.py::maybe_send_storm_alert()`.
+
+Corre cada 10 min (`app/main.py::_nowcast_refresh`, separado de
+`_hourly_refresh` porque el cálculo de velocidad necesita instantáneas cercanas
+en el tiempo, no una por hora).
+
+## Backtest: `scripts/verify_glm_lead_29ago.py`
+
+Descarga los ~1800 archivos GLM del 29-ago-2026 sobre el corredor (sin
+submuestreo) y mide el lead real del mecanismo de centroide+ETA contra el
+colapso de capa límite documentado en Tenerife (18h local / 23:00 UTC — la
+huella del downburst tocando el pueblo).
+
+**Resultado: 270 minutos de lead** (primera señal accionable a las 18:30 UTC, ETA
+80 min a Tenerife; impacto documentado a las 23:00 UTC). Reproducible con:
+
+```bash
+pip install h5py
+python scripts/verify_glm_lead_29ago.py
+```
+
+### Límite conocido (no es una falla de este diseño)
+
+Un primer intento del backtest medía el lead contra **Chibolo** en vez de Tenerife
+y daba solo 10-40 min — parecía un fallo. No lo es: la actividad de rayos en *todo*
+el corredor apareció recién a las 18:00 UTC, exactamente cuando el colapso de capa
+límite de Chibolo ya empezaba — la tormenta se formó encima de su propio objetivo.
+Ningún método de monitoreo puede anticipar una tormenta que nace donde va a pegar;
+es un límite físico, no algo que un nowcast distinto resolviera. Tenerife, en
+cambio, fue alcanzado por un sistema que venía moviéndose desde la frontera con
+Cesar durante ~4 horas — ese es el caso que sí puede (y debe) anticiparse, y es el
+caso relevante para proteger la CGSM, que es un objetivo lejano al que un sistema
+tendría que acercarse, no formarse encima.
+
+Consecuencia práctica: este nowcast avisa de sistemas que se acercan por el
+corredor. Una tormenta que se forma súbitamente cerca de la propia CGSM no daría
+lead — igual que le pasó a Chibolo ese día.
 
 ## Mensaje que recibe el pescador
 
-> ⚠️ Viento fuerte anunciado para el 30/08 14:00, con ráfagas de hasta 65 km/h.
-> Evita salir a pescar en ese horario y asegura bien tu embarcación.
+> ⚡ Tormenta fuerte acercándose desde el sur, llega en ~45 min. No salgas a pescar
+> ahora y asegura tu embarcación.
 
-Corto, sin jerga, con acción concreta — según `docs/GUARDRAILS.md`.
-
-## Backtest contra el evento real del 29 de agosto — qué se pudo verificar
-
-Se intentó confirmar con datos reales si Open-Meteo habría disparado la alerta
-con ≥1h de anticipación para el vendaval del 29 de agosto. Resultado:
-
-- **No se pudo ejecutar el backtest** desde el entorno donde se investigó esto:
-  tanto `api.open-meteo.com` (la misma URL que ya usa `weather.py` en
-  producción) como `archive-api.open-meteo.com` y `previous-runs-api.open-meteo.com`
-  están bloqueados por la política de red de ese sandbox (mismo bloqueo que ya
-  afectaba a `ideam.gov.co` — confirmado con `curl`/`WebFetch`, ambos devuelven
-  rechazo de política, no un problema del lado de Open-Meteo). Esto es una
-  limitación del entorno de investigación, no evidencia de que la integración
-  en producción falle: el servidor universitario ya llama esa misma API con
-  éxito hoy para el clima del bot.
-- Se dejó listo `scripts/verify_vendaval_forecast_lead.py` para correr el
-  backtest real desde una máquina con salida a internet (compara la ráfaga
-  observada ese día contra lo que decían corridas de pronóstico anteriores,
-  hora por hora) — sigue el mismo patrón que `scripts/verify_alert_lock.py`
-  (script de verificación manual, no pytest).
-- **Hallazgo geográfico, este sí verificable sin llamar a la API:** el
-  vendaval reportado por medios se desplazó **desde Cesar hacia el centro del
-  Magdalena** — Tenerife, Ariguaní, Chibolo, Plato, Santa Ana, San Zenón,
-  Pijiño del Carmen, Sabanas de San Ángel, Cerro de San Antonio, Concordia,
-  Pivijay. Todos estos municipios quedan al **sur** del centroide de la CGSM
-  (10.859056, -74.460611) que es el ÚNICO punto que hoy consulta
-  `get_wind_gust_forecast()` — a ojo sobre el mapa del departamento, del orden
-  de 80-160 km de distancia según el municipio (no geocodificado con precisión,
-  ver el aviso en el script). **Implicación importante:** aunque el pronóstico
-  de Open-Meteo hubiera sido perfecto, un chequeo en un solo punto sobre la
-  CGSM no necesariamente ve lo que pasa 100+ km al sur — la alerta tal como
-  está implementada cubre la zona de pesca de la Ciénaga (que es lo que pide
-  el proyecto), no "vendaval en cualquier parte del Magdalena". No hay
-  confirmación en la prensa de que la propia CGSM/Santa Marta haya tenido
-  ráfaga de nivel vendaval ese día (sí lluvia, según un titular suelto de
-  IDEAM) — sin poder correr el backtest, no se puede afirmar si el punto CGSM
-  específicamente habría cruzado el umbral o no.
-- Tampoco se encontró en prensa la hora exacta del evento ni cuántas horas
-  antes avisó IDEAM — los titulares confirman el día (sábado 29) y que fue
-  "en las últimas horas" del día, sin más precisión.
+Corto, con acción concreta, según `docs/GUARDRAILS.md`.
 
 ## Pendiente
 
-- **Verificar el endpoint real de IDEAM** desde una red sin el bloqueo de este
-  entorno (`curl -v` a `pronosticosyalertas.gov.co/en/datos-de-alertas` y observar
-  la petición que dispara su selector de descarga, o escribir a IDEAM pidiendo
-  documentación de API — ambos casos igual que se hizo para GBIF/Socrata en
-  `IDEAM_GBIF_VALIDACION.md`). Si aparece un endpoint estructurado (JSON o CSV con
-  URL fija y parámetros), agregar `get_ideam_avisos()` a `app/services/ingestion/alerts_ext.py`
-  siguiendo exactamente el patrón de `get_cyclone_alerts()` — la persistencia
-  (`ExternalAlert`) y el envío (`maybe_send_wind_alert`) ya están listos para recibir
-  una segunda fuente sin cambios adicionales; solo faltaría sumar sus resultados
-  antes de decidir si avisar.
-- **Crear y aprobar `alerta_vendaval` en Meta Business Manager** — sin esto, el envío
-  real de WhatsApp falla en producción (`whatsapp_service.send_template_message`
-  retorna `None`, se loggea el error, no se cae el proceso).
-- **Validar el umbral de 62 km/h con el equipo** (Diego/Daniel) — es un valor de
-  literatura meteorológica general, no un umbral oficial de IDEAM ni ajustado a la
-  CGSM específicamente.
+- **Crear y aprobar `alerta_tormenta` en Meta Business Manager** — sin esto el
+  envío real de WhatsApp falla en producción (`send_template_message` retorna
+  `None`, se loggea el error, no se cae el proceso).
+- **Validar con Diego** el radio de la zona de pesca y el ETA máximo de 90 min.
 - **DIMAR/CIOH** (avisos marítimos de la Capitanía de Puerto Santa Marta) como
-  fuente complementaria específica para navegación — no investigado en esta ronda,
-  candidato natural si se quiere una alerta más específica que el vendaval terrestre.
-- **Correr `scripts/verify_vendaval_forecast_lead.py`** contra el 29 de agosto desde
-  una red real (servidor universitario o cualquier máquina con internet) — es el
-  único paso que falta para responder con datos reales, no con razonamiento, si
-  Open-Meteo habría avisado con ≥1h de anticipación en el centroide CGSM.
-- **Decidir si un solo punto (centroide CGSM) es suficiente**, dado el hallazgo de
-  que este evento concreto se concentró en Magdalena central/sur, lejos de ese
-  punto. Si el objetivo es "vendaval que afecte a los pescadores de la CGSM", un
-  solo punto tiene sentido; si se quiere también anticipar sistemas que se acercan
-  desde el sur/Cesar antes de que lleguen a la Ciénaga, se necesitaría consultar
-  1-2 puntos adicionales (p.ej. Pivijay o el centro del departamento) — cambio
-  pequeño en `get_wind_gust_forecast()`/`maybe_send_wind_alert()` si se decide.
+  fuente complementaria específica para navegación — no investigado en esta ronda.

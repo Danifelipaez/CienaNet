@@ -51,12 +51,14 @@ las variables de entorno también en el scope "Preview" y confirmar
 
 ## `RUN_SCHEDULER`
 
-`app/main.py` tiene un loop en background (`_hourly_refresh`) que refresca el
-snapshot ambiental y evalúa/envía alertas de WhatsApp. Como el backend corre
-en un único proceso persistente, `RUN_SCHEDULER=true` en producción (servidor
+`app/main.py` tiene dos loops en background gateados por el mismo flag:
+`_hourly_refresh` (refresca el snapshot ambiental y evalúa/envía la alerta de
+semáforo, cada hora) y `_nowcast_refresh` (nowcast de tormenta por rayos GOES-19
+GLM, cada 10 min — ver `docs/ALERTAS_VENDAVAL.md`). Como el backend corre en un
+único proceso persistente, `RUN_SCHEDULER=true` en producción (servidor
 universitario) y `false` por defecto en local dev (ponelo en `true` solo para
-probar el loop horario en tu máquina). El advisory lock en
-`maybe_send_alert` (ver más abajo) protege igual contra duplicados si dos
+probar los loops en tu máquina). El advisory lock en `maybe_send_alert` /
+`maybe_send_storm_alert` (ver más abajo) protege igual contra duplicados si dos
 instancias locales llegaran a correr a la vez.
 
 **Riesgo operativo al habilitar `RUN_SCHEDULER` por primera vez tras un
