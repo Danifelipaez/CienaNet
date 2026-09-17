@@ -1,4 +1,5 @@
 .env
+.env.evolution
 firmware/**/config.h
 .venv/
 venv/

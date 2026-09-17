@@ -56,7 +56,12 @@ async def _post_evolution(to: str, text: str) -> dict | None:
                 headers={"apikey": settings.evolution_api_key},
             )
             resp.raise_for_status()
-            return resp.json()
+            body = resp.json()
+            # message_router.py lee sent["messages"][0]["id"] (forma de Meta) para
+            # guardar wa_message_id — Evolution devuelve {"key": {"id": ...}}, normalizamos
+            # acá para que ese lector no necesite conocer el provider.
+            msg_id = (body.get("key") or {}).get("id")
+            return {"messages": [{"id": msg_id}]} if msg_id else body
     except Exception as exc:
         logger.error("Fallo al enviar mensaje WhatsApp (evolution) a %s: %s", _mask(to), exc)
         return None

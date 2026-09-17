@@ -1,0 +1,52 @@
+# Evolution API (Baileys) para pruebas locales del adaptador /api/v1/webhook/evolution
+# mientras la verificación de negocio de Meta está pendiente. Ver docs/WHATSAPP_API.md
+# y app/api/v1/routers/webhook.py. NO usar en producción real.
+
+services:
+  api:
+    container_name: evolution_api
+    image: evoapicloud/evolution-api:latest
+    restart: unless-stopped
+    depends_on:
+      - redis
+      - evolution-postgres
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - evolution-net
+    env_file:
+      - .env.evolution
+
+  redis:
+    container_name: evolution_redis
+    image: redis:latest
+    restart: unless-stopped
+    command: >
+      redis-server --port 6379 --appendonly yes
+    volumes:
+      - evolution_redis:/data
+    networks:
+      - evolution-net
+
+  evolution-postgres:
+    container_name: evolution_postgres
+    image: postgres:15
+    restart: unless-stopped
+    env_file:
+      - .env.evolution
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - evolution-net
+
+volumes:
+  evolution_instances:
+  evolution_redis:
+  postgres_data:
+
+networks:
+  evolution-net:
+    name: evolution-net
+    driver: bridge

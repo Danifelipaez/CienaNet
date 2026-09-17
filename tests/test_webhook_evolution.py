@@ -62,9 +62,23 @@ def test_mensaje_de_texto_llama_handle_incoming_text(client):
     assert resp.json() == {"status": "ok"}
     mock_handle.assert_awaited_once()
     kwargs = mock_handle.call_args.kwargs
-    assert kwargs["wa_id"] == "573001234567"
+    # JID completo (no solo el número): necesario para poder responderle de
+    # vuelta a contactos `@lid` (ver comentario en webhook.py).
+    assert kwargs["wa_id"] == "573001234567@s.whatsapp.net"
     assert kwargs["nombre"] == "Pescador"
     assert kwargs["text"] == "hola pescador"
+
+
+def test_contacto_lid_usa_jid_completo_como_wa_id(client):
+    with patch("app.api.v1.routers.webhook.AsyncSessionLocal", return_value=_mock_session()), \
+         patch("app.api.v1.routers.webhook.handle_incoming_text", new_callable=AsyncMock) as mock_handle:
+        resp = client.post(
+            f"{URL}?token=topsecret",
+            json=_payload({"conversation": "hola"}, remote_jid="125958640140481@lid"),
+        )
+
+    assert resp.status_code == 200
+    assert mock_handle.call_args.kwargs["wa_id"] == "125958640140481@lid"
 
 
 def test_extended_text_message_tambien_se_extrae(client):

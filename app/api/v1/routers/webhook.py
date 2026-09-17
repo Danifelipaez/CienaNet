@@ -90,9 +90,8 @@ async def receive_webhook_evolution(request: Request, token: str = Query(default
         data = payload.get("data", {})
         key = data.get("key", {})
         remote_jid = key.get("remoteJid", "")
-        # ponytail: asume JID de contacto directo (`@s.whatsapp.net`); grupos
-        # (`@g.us`) y mensajes propios (eco de lo que el bot mismo envió) quedan
-        # fuera de alcance del bot 1:1 con pescadores.
+        # ponytail: grupos (`@g.us`) y mensajes propios (eco de lo que el bot
+        # mismo envió) quedan fuera de alcance del bot 1:1 con pescadores.
         if key.get("fromMe") or "@g.us" in remote_jid:
             return {"status": "ignored"}
 
@@ -101,7 +100,12 @@ async def receive_webhook_evolution(request: Request, token: str = Query(default
         if not text_body:
             return {"status": "ignored"}  # no es texto plano (imagen, audio, sticker...)
 
-        wa_id = remote_jid.split("@")[0]
+        # JID completo (con dominio), no solo el número: WhatsApp expone algunos
+        # contactos como `@lid` (identificador enlazado, privacidad) en vez del
+        # número real (`@s.whatsapp.net`) — confirmado en pruebas reales de la
+        # demo. Evolution acepta ambos como "number" al responder, pero solo si
+        # se manda el JID completo; el número sin dominio de un LID no es válido.
+        wa_id = remote_jid
     except (AttributeError, TypeError):
         logger.warning("Payload de Evolution con forma inesperada, ignorado")
         return {"status": "ignored"}

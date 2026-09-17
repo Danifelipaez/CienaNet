@@ -4,8 +4,18 @@ llega a los pescadores. Sin tests antes (ver auditoría de deuda técnica)."""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.core.config import settings
 from app.services import whatsapp_service
+
+
+@pytest.fixture(autouse=True)
+def _default_meta_provider(monkeypatch):
+    # El .env real del proyecto puede tener WHATSAPP_PROVIDER=evolution (demo
+    # temporal, ver docker-compose.evolution.yml) — aislar los tests de ese
+    # estado ambiental; los tests de evolution lo pisan explícitamente.
+    monkeypatch.setattr(settings, "whatsapp_provider", "meta")
 
 
 def _mock_client(response=None, raise_exc=None):
@@ -104,7 +114,9 @@ def test_send_text_message_evolution_llama_endpoint_correcto(monkeypatch):
     with patch("app.services.whatsapp_service.httpx.AsyncClient", return_value=client):
         result = asyncio.run(whatsapp_service.send_text_message("573000000000", "hola pescador"))
 
-    assert result == {"key": {"id": "abc"}}
+    # message_router.py lee sent["messages"][0]["id"] (forma de Meta) — normalizamos
+    # la respuesta de Evolution ({"key": {"id": ...}}) a esa forma.
+    assert result == {"messages": [{"id": "abc"}]}
     args, kwargs = client.post.call_args
     assert args[0] == "http://localhost:8080/message/sendText/demo"
     assert kwargs["json"] == {"number": "573000000000", "text": "hola pescador"}
