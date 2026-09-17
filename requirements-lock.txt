@@ -15,7 +15,7 @@ colorama==0.4.6
 cryptography==49.0.0
 deprecation==2.1.0
 erddapy==3.3.0
-fastapi==0.138.1
+fastapi==0.141.1
 feedparser==6.0.12
 greenlet==3.5.3
 gsw==3.6.23
