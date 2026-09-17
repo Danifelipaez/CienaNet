@@ -6,7 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.alert_service import maybe_send_alert, maybe_send_storm_alert
+from app.services.alert_service import maybe_send_alert, maybe_send_storm_alert, send_manual_alert
 
 
 def _result(scalar=None, scalars_all=None):
@@ -156,3 +156,26 @@ def test_tormenta_sin_alerta_previa_envia():
         asyncio.run(maybe_send_storm_alert(_TORMENTA, db))
 
     assert db.add.call_count == 2
+
+
+def test_manual_alert_envia_a_todos_sin_dedup():
+    """A diferencia de maybe_send_alert/maybe_send_storm_alert, no hay chequeo de
+    último estado: es una acción explícita, siempre envía."""
+    user = MagicMock(wa_id="+570000000")
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[_result(scalars_all=[user])])
+    db.add = MagicMock()
+
+    with patch(
+        "app.services.whatsapp_service.send_template_message",
+        new_callable=AsyncMock,
+        return_value=True,
+    ) as mock_send:
+        sent = asyncio.run(send_manual_alert("Onda tropical, no salga a pescar mañana", db))
+
+    assert sent == 1
+    mock_send.assert_awaited_once()
+    added = db.add.call_args.args[0]
+    assert added.alert_type == "manual"
+    assert added.destinatarios_count == 1
+    db.commit.assert_awaited_once()
