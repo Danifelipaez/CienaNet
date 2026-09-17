@@ -63,6 +63,56 @@ async def receive_webhook(
     return {"status": "ok"}
 
 
+@router.post("/evolution")
+async def receive_webhook_evolution(request: Request, token: str = Query(default="")) -> dict:
+    """Alternativa temporal a /whatsapp: recibe eventos de Evolution API
+    (Baileys) mientras la verificación de negocio de Meta está pendiente (ver
+    docs/WHATSAPP_API.md). Apuntar el webhook de la instancia de Evolution a
+    esta URL con ?token=<settings.evolution_webhook_secret> — Evolution no
+    firma sus webhooks como Meta, así que el token en la query es la única
+    validación de origen.
+    """
+    if not settings.evolution_webhook_secret or token != settings.evolution_webhook_secret:
+        raise HTTPException(status_code=403)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ignored"}  # body no es JSON válido
+
+    # Evolution es self-hosted y sin schema garantizado entre versiones/forks —
+    # a diferencia de /whatsapp (Meta, formato estable), cualquier forma
+    # inesperada del payload se ignora en vez de tumbar el webhook con un 500.
+    try:
+        if payload.get("event") != "messages.upsert":
+            return {"status": "ignored"}
+
+        data = payload.get("data", {})
+        key = data.get("key", {})
+        remote_jid = key.get("remoteJid", "")
+        # ponytail: asume JID de contacto directo (`@s.whatsapp.net`); grupos
+        # (`@g.us`) y mensajes propios (eco de lo que el bot mismo envió) quedan
+        # fuera de alcance del bot 1:1 con pescadores.
+        if key.get("fromMe") or "@g.us" in remote_jid:
+            return {"status": "ignored"}
+
+        message = data.get("message") or {}
+        text_body = message.get("conversation") or (message.get("extendedTextMessage") or {}).get("text")
+        if not text_body:
+            return {"status": "ignored"}  # no es texto plano (imagen, audio, sticker...)
+
+        wa_id = remote_jid.split("@")[0]
+    except (AttributeError, TypeError):
+        logger.warning("Payload de Evolution con forma inesperada, ignorado")
+        return {"status": "ignored"}
+    async with AsyncSessionLocal() as db:
+        await _process_text_message(
+            wa_id, data.get("pushName"), {"id": key.get("id", ""), "text": {"body": text_body}}, db
+        )
+
+    return {"status": "ok"}
+
+
 async def _process_text_message(wa_id: str, nombre: str | None, message: dict, db: AsyncSession) -> None:
     try:
         await handle_incoming_text(

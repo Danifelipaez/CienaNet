@@ -2,6 +2,9 @@
 
 Regla de CLAUDE.md: nunca loggear contenido de mensajes ni números completos —
 los logs de error de este módulo solo incluyen los últimos 4 dígitos del destinatario.
+
+Soporta también "evolution" (settings.whatsapp_provider) — Baileys vía Evolution
+API self-hosted, mientras la verificación de negocio de Meta está pendiente.
 """
 
 import logging
@@ -39,8 +42,31 @@ async def _post(payload: dict, to: str) -> dict | None:
         return None
 
 
+async def _post_evolution(to: str, text: str) -> dict | None:
+    if not settings.evolution_api_url or not settings.evolution_api_key or not settings.evolution_instance:
+        logger.warning("Evolution API no configurado (faltan evolution_api_url / evolution_api_key / evolution_instance)")
+        return None
+
+    url = f"{settings.evolution_api_url.rstrip('/')}/message/sendText/{settings.evolution_instance}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                url,
+                json={"number": to, "text": text},
+                headers={"apikey": settings.evolution_api_key},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as exc:
+        logger.error("Fallo al enviar mensaje WhatsApp (evolution) a %s: %s", _mask(to), exc)
+        return None
+
+
 async def send_text_message(to: str, message: str) -> dict | None:
-    """Envía un mensaje de texto simple. Solo funciona dentro de la ventana de 24h."""
+    """Envía un mensaje de texto simple. Con provider "meta" solo funciona
+    dentro de la ventana de 24h; con "evolution" no hay esa restricción."""
+    if settings.whatsapp_provider == "evolution":
+        return await _post_evolution(to, message)
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
@@ -76,7 +102,15 @@ async def send_button_message(to: str, body: str, buttons: list[dict]) -> dict |
 
 
 async def send_template_message(to: str, template_name: str, params: list[str] | None = None) -> dict | None:
-    """Envía un template pre-aprobado (única forma de iniciar contacto fuera de la ventana de 24h)."""
+    """Envía un template pre-aprobado (única forma de iniciar contacto fuera de la ventana de 24h).
+
+    Con provider "evolution" no existe el concepto de template aprobado por
+    Meta: Baileys manda texto plano sin restricción de ventana, así que se
+    manda directo el primer param (los dos call sites en alert_service.py ya
+    arman ahí el mensaje completo).
+    """
+    if settings.whatsapp_provider == "evolution":
+        return await _post_evolution(to, (params or [template_name])[0])
     components = []
     if params:
         components.append(

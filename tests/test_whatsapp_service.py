@@ -93,3 +93,40 @@ def test_mask_solo_expone_los_ultimos_4_digitos():
     # Regla de CLAUDE.md: nunca loggear números de teléfono completos.
     assert whatsapp_service._mask("+573001234567") == "***4567"
     assert whatsapp_service._mask("12") == "***"
+
+
+def test_send_text_message_evolution_llama_endpoint_correcto(monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_provider", "evolution")
+    monkeypatch.setattr(settings, "evolution_api_url", "http://localhost:8080")
+    monkeypatch.setattr(settings, "evolution_api_key", "evokey")
+    monkeypatch.setattr(settings, "evolution_instance", "demo")
+    client = _mock_client(response={"key": {"id": "abc"}})
+    with patch("app.services.whatsapp_service.httpx.AsyncClient", return_value=client):
+        result = asyncio.run(whatsapp_service.send_text_message("573000000000", "hola pescador"))
+
+    assert result == {"key": {"id": "abc"}}
+    args, kwargs = client.post.call_args
+    assert args[0] == "http://localhost:8080/message/sendText/demo"
+    assert kwargs["json"] == {"number": "573000000000", "text": "hola pescador"}
+    assert kwargs["headers"]["apikey"] == "evokey"
+
+
+def test_send_template_message_evolution_manda_param_como_texto_plano(monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_provider", "evolution")
+    monkeypatch.setattr(settings, "evolution_api_url", "http://localhost:8080")
+    monkeypatch.setattr(settings, "evolution_api_key", "evokey")
+    monkeypatch.setattr(settings, "evolution_instance", "demo")
+    client = _mock_client()
+    with patch("app.services.whatsapp_service.httpx.AsyncClient", return_value=client):
+        asyncio.run(whatsapp_service.send_template_message("573000000000", "alerta_tormenta", ["se acerca una tormenta"]))
+
+    assert client.post.call_args.kwargs["json"]["text"] == "se acerca una tormenta"
+
+
+def test_evolution_sin_credenciales_no_llama_al_api(monkeypatch):
+    monkeypatch.setattr(settings, "whatsapp_provider", "evolution")
+    monkeypatch.setattr(settings, "evolution_api_url", "")
+    with patch("app.services.whatsapp_service.httpx.AsyncClient") as mock_cls:
+        result = asyncio.run(whatsapp_service.send_text_message("573000000000", "hola"))
+    assert result is None
+    mock_cls.assert_not_called()

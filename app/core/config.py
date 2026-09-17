@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = ""
     whatsapp_app_secret: str = ""
 
+    # "meta" (Cloud API oficial) o "evolution" (Baileys vía Evolution API,
+    # self-hosted) — usado solo mientras la verificación de negocio de Meta
+    # está pendiente, ver docs/WHATSAPP_API.md. NO es para producción: sin
+    # verificación de negocio real, cambiar de vuelta a "meta" apenas Meta
+    # apruebe la cuenta.
+    whatsapp_provider: str = "meta"
+    evolution_api_url: str = ""
+    evolution_api_key: str = ""
+    evolution_instance: str = ""
+    evolution_webhook_secret: str = ""
+
     # IA / NLU — proveedor agnóstico; la implementación concreta vive en ai_service.py
     ai_api_key: str = ""
     ai_model: str = "gemini-flash-lite-latest"  # ajustar al id exacto de AI Studio
