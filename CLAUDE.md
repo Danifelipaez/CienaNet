@@ -3,7 +3,7 @@
 Este archivo es el punto de entrada para cualquier asistente de IA trabajando en este repositorio. Leer antes de generar cualquier código.
 
 ## ¿Qué es esto?
-Backend FastAPI para **CienRayas**, una app que entrega información ambiental de la Ciénaga Grande de Santa Marta a pescadores artesanales vía WhatsApp. Ver `/docs/CONTEXT.md` para contexto completo.
+Backend FastAPI para **CienaRed**, una app que entrega información ambiental de la Ciénaga Grande de Santa Marta a pescadores artesanales vía WhatsApp. Ver `/docs/CONTEXT.md` para contexto completo.
 
 ## Stack
 Desplegado en el servidor universitario. El frontend (dashboard Next.js) vive en un repo separado, `CienaRed-Frontend`, desplegado en Vercel. Ver `/docs/STACK.md` y `/docs/DEPLOYMENT.md`.

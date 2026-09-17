@@ -2,6 +2,17 @@
 
 from datetime import UTC, datetime
 
+# ponytail: alerta puntual hardcodeada (no hay ingesta de alertas IDEAM todavía).
+# Vence después del 18-sep-2026 — borrar esta constante y sus usos en dashboard.py
+# / message_router.py cuando la onda tropical pase, o subir a una fuente en vivo
+# si esto se vuelve recurrente. Fuente: IDEAM, vía prensa (diariolalibertad.com,
+# eltiempo.com), 16-sep-2026.
+ALERTA_IDEAM_ONDA_TROPICAL = (
+    "onda tropical sobre el Caribe colombiano (14 al 18 de septiembre de 2026), "
+    "con lluvias fuertes, tormentas eléctricas y vientos, más intensa el jueves 17 "
+    "y viernes 18 — precaución cerca de ríos y caños por crecientes súbitas"
+)
+
 
 def build_ai_context(snapshot: dict, vendaval: dict | None = None) -> str:
     """Arma el bloque de contexto ambiental para el prompt de Gemini (dashboard.ask_ai

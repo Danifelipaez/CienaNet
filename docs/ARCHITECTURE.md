@@ -98,7 +98,7 @@
 ## Flujo WhatsApp (entrada de mensaje)
 
 ```
-1. Pescador escribe a número de WhatsApp de CienRayas
+1. Pescador escribe a número de WhatsApp de CienaRed
 2. Meta → POST /webhook/whatsapp con payload JSON
 3. FastAPI valida firma HMAC (X-Hub-Signature-256)
 4. MessageRouter identifica tipo: texto / audio / imagen / botón

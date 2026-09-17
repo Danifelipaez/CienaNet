@@ -1,7 +1,7 @@
 # Contexto del Proyecto: CienaNet Bot
 
 ## Propósito
-CienaNet Bot es el backend de CienRayas, una aplicación web móvil para pescadores artesanales de la **Ciénaga Grande de Santa Marta**, Colombia. El sistema conecta a los pescadores con información ambiental (temperatura del agua, salinidad, pH) recolectada por una red de sensores IoT de bajo costo, entregada a través de WhatsApp porque es el canal que ya usan.
+CienaNet Bot es el backend de CienaRed, una aplicación web móvil para pescadores artesanales de la **Ciénaga Grande de Santa Marta**, Colombia. El sistema conecta a los pescadores con información ambiental (temperatura del agua, salinidad, pH) recolectada por una red de sensores IoT de bajo costo, entregada a través de WhatsApp porque es el canal que ya usan.
 
 ## El Problema
 Los pescadores artesanales de la Ciénaga no tienen acceso a datos ambientales en tiempo real que les permitan tomar mejores decisiones sobre dónde y cuándo pescar. La Ciénaga sufre de contaminación, cambios de salinidad y degradación ambiental que afectan directamente sus capturas y medios de vida.

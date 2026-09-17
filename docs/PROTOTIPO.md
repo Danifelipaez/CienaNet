@@ -97,7 +97,7 @@ Modelo multivariable 0–100 puntos, ponderado:
 
 **Lo más valioso del prototipo para el equipo de contenido:**
 
-- El bot habla como **"CienRayas"**, un pescador caribeño, no como un sistema técnico
+- El bot habla como **"CienaRed"**, un pescador caribeño, no como un sistema técnico
 - Usa **términos locales validados**:
   - "faena" = jornada de pesca
   - "cardumen" = banco de peces

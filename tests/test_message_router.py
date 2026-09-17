@@ -45,7 +45,7 @@ def test_saludo():
     ) as mock_send:
         asyncio.run(handle_incoming_text("+570000000", "Ana", "hola", "wamid.in", db))
     reply = mock_send.call_args.args[1]
-    assert "CienRayas" in reply
+    assert "CienaRed" in reply
 
 
 def test_condicion_no_llama_get_latest_snapshot():

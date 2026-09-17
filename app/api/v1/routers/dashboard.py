@@ -1,4 +1,4 @@
-"""Endpoints del dashboard interno CienRayas (vistas Mapa / Pregunta IA / Sistema).
+"""Endpoints del dashboard interno CienaRed (vistas Mapa / Pregunta IA / Sistema).
 
 GET  /dashboard/points         — puntos de pesca con condición/IPP actual
 GET  /dashboard/species        — catálogo de especies (estático, ver ponytail abajo)
@@ -26,7 +26,7 @@ from app.schemas.dashboard import (
     AskRequest,
     AskResponse,
 )
-from app.services.ai_context import build_ai_context, camaron_moonrise_hint
+from app.services.ai_context import ALERTA_IDEAM_ONDA_TROPICAL, build_ai_context, camaron_moonrise_hint
 from app.services.ai_service import get_ai_provider
 from app.services.dashboard_service import get_latest_snapshot
 from app.services.points_service import get_points
@@ -121,8 +121,12 @@ async def ask_ai(
     """
     snapshot = await get_latest_snapshot(db)
     system = (
-        "Eres el asistente técnico-científico de CienRayas para el equipo de "
-        "monitoreo de la Ciénaga Grande de Santa Marta. Contexto ambiental actual: "
+        "Eres el asistente técnico-científico de CienaRed para el equipo de "
+        "monitoreo de la Ciénaga Grande de Santa Marta. Si el usuario solo saluda "
+        "(ej. 'hola') sin hacer una pregunta puntual, preséntate primero en una o "
+        "dos frases — quién eres y qué hace este asistente (monitoreo ambiental de "
+        "la ciénaga: condiciones, calidad de agua, alertas) — antes de dar cualquier "
+        "dato. Contexto ambiental actual: "
         f"{build_ai_context(snapshot, snapshot.get('senales', {}).get('vendaval'))} "
         "Responde en español, usando solo los datos de este contexto (no inventes "
         "valores). Cuando cites un dato puntual (temperatura, humedad, viento, "
@@ -141,7 +145,17 @@ async def ask_ai(
         "entidades HTML como '&eacute;' o '&ntilde;', ni siquiera dentro del campo "
         "'html'. Si la pregunta es sobre el pasado (histórico) o necesitas un dato "
         "que no está en este contexto, usa las herramientas disponibles en vez de "
-        "inventarlo."
+        "inventarlo. El campo 'sugerencia' es una pregunta de seguimiento redactada "
+        "como la haría el usuario (ej. '¿Cómo está la calidad del agua en "
+        "Tasajera?'), nunca una pregunta dirigida al usuario ofreciéndole opciones "
+        "(nunca 'Deseas consultar...' ni 'Quieres saber...') — se reenvía tal cual "
+        "como su siguiente mensaje si la elige."
+        f"\nAlerta oficial IDEAM vigente: {ALERTA_IDEAM_ONDA_TROPICAL}. Al saludar o "
+        "cuando te pregunten por el estado actual de la ciénaga o las condiciones de "
+        "los próximos días, nómbrala en una frase corta (que existe una alerta IDEAM "
+        "vigente y hasta cuándo) SIN listar sus detalles (lluvias, vientos, "
+        "recomendación); da el detalle completo solo si te preguntan específicamente "
+        "por la alerta. El resto de las respuestas no la necesita en absoluto."
     )
     if body.contexto:
         system += (

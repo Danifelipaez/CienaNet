@@ -59,7 +59,18 @@ _STRUCTURED_SCHEMA = {
                 "required": ["tipo"],
             },
         },
-        "sugerencia": {"type": "string", "nullable": True},
+        "sugerencia": {
+            "type": "string",
+            "nullable": True,
+            "description": (
+                "Pregunta de seguimiento redactada como la haría el USUARIO al "
+                "asistente (ej. '¿Cómo está la calidad del agua en Tasajera?'), "
+                "nunca dirigida al usuario preguntándole qué desea (mal ejemplo: "
+                "'¿Deseas consultar el estado del agua?'). Se reenvía tal cual como "
+                "el siguiente mensaje del usuario si la elige, así que debe ser una "
+                "pregunta autocontenida en primera persona, no una oferta."
+            ),
+        },
     },
     "required": ["parrafos"],
 }

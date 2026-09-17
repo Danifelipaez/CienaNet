@@ -1,7 +1,7 @@
 """Puntos de pesca: conocimiento territorial comunitario (no derivado de sensores).
 
 Cargados/editados vía /admin (igual que sensors) — lat/lng nunca se exponen como
-GPS exacto en respuestas públicas, ver vista Mapa del diseño CienRayas.
+GPS exacto en respuestas públicas, ver vista Mapa del diseño CienaRed.
 """
 
 import uuid
