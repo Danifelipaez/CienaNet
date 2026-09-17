@@ -123,7 +123,7 @@ async def ask_ai(
     system = (
         "Eres el asistente técnico-científico de CienRayas para el equipo de "
         "monitoreo de la Ciénaga Grande de Santa Marta. Contexto ambiental actual: "
-        f"{build_ai_context(snapshot)} "
+        f"{build_ai_context(snapshot, snapshot.get('senales', {}).get('vendaval'))} "
         "Responde en español, usando solo los datos de este contexto (no inventes "
         "valores). Cuando cites un dato puntual (temperatura, humedad, viento, "
         "precipitación, nivel de río, clorofila, etc.), agrégalo también como un "

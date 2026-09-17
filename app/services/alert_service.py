@@ -169,6 +169,40 @@ async def maybe_send_storm_alert(tormenta: dict | None, db: AsyncSession) -> Non
     logger.info("Alerta de tormenta (ETA %d min, %s) enviada a %d destinatarios", eta, tormenta["rumbo"], sent_count)
 
 
+async def send_manual_alert(mensaje: str, db: AsyncSession, alert_type: str = "manual") -> int:
+    """Envía un aviso a mano a todos los suscritos — para eventos confirmados por
+    una fuente externa sin ingesta automática (p.ej. boletín IDEAM de onda
+    tropical, ver conversación de evaluación de fuentes). Sin dedup ni advisory
+    lock: es una acción explícita de un humano, no un chequeo periódico que
+    pueda dispararse dos veces por una carrera entre workers.
+    """
+    recipients = (
+        await db.execute(select(User).where(User.alertas_activas.is_(True)))
+    ).scalars().all()
+
+    sent_count = 0
+    for user in recipients:
+        result = await whatsapp_service.send_template_message(
+            user.wa_id, _ALERT_TEMPLATE, params=[mensaje]
+        )
+        if result:
+            sent_count += 1
+
+    db.add(
+        AlertLog(
+            alert_type=alert_type,
+            color="aviso",
+            zonas="Todas",
+            canal="whatsapp",
+            texto=mensaje,
+            destinatarios_count=sent_count,
+        )
+    )
+    await db.commit()
+    logger.info("Aviso manual (%s) enviado a %d destinatarios", alert_type, sent_count)
+    return sent_count
+
+
 async def get_alert_status(db: AsyncSession) -> dict:
     """Snapshot de alertas de solo lectura — mismo dato que GET /data/alerts, más
     el nowcast de tormenta por rayos. No dispara envíos ni persiste.

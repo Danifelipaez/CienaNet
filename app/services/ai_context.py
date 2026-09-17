@@ -3,13 +3,19 @@
 from datetime import UTC, datetime
 
 
-def build_ai_context(snapshot: dict) -> str:
-    """Arma el bloque de contexto ambiental para el prompt de Gemini (dashboard.ask_ai).
+def build_ai_context(snapshot: dict, vendaval: dict | None = None) -> str:
+    """Arma el bloque de contexto ambiental para el prompt de Gemini (dashboard.ask_ai
+    y message_router.py).
 
     Cubre las mismas fuentes que /data/latest — clima por estación (CGSM + Tasajera,
     con humedad) e hidrometeorología IDEAM (lluvia/nivel de río) — resumidas a su
     última lectura por estación para no inflar el prompt con series completas; el
     histórico completo ya vive en /data/history si se necesita más adelante.
+
+    `vendaval`: outlook de vendaval de signals.vendaval_risk() (48h, modelo CAPE/CIN).
+    Siempre en el contexto cuando hay dato, para que la respuesta no dependa de si
+    el pescador preguntó con la frase exacta que dispara un tool — el clima es uno
+    solo, no debería variar según cómo se formuló la pregunta.
     """
     parts = [
         f"Semáforo: {snapshot['semaphore']['reason']}.",
@@ -56,6 +62,16 @@ def build_ai_context(snapshot: dict) -> str:
     if oxigeno:
         detalle = "; ".join(f"{r['estacion']} {r['valor']} {r['unidad']} ({r['rango']})" for r in oxigeno)
         parts.append(f"Oxígeno disuelto INVEMAR (REDCAM) por estación: {detalle}.")
+
+    nivel_vendaval = (vendaval or {}).get("nivel")
+    if nivel_vendaval:
+        parts.append(
+            f"Outlook de vendaval/ráfagas para las próximas 48h (modelo, NO es medición "
+            f"ni alerta oficial, con historial de falsos positivos en temporada de "
+            f"lluvias): nivel {nivel_vendaval}. Menciónalo siempre que respondas sobre "
+            "pronóstico o si va a llover/haber viento fuerte, dejando claro que es una "
+            "estimación de modelo, no una certeza."
+        )
 
     return " ".join(parts)
 
