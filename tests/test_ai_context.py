@@ -44,3 +44,18 @@ def test_build_ai_context_incluye_tasajera_y_ultima_lectura_ideam_por_estacion()
     assert "Tasajera" in texto and "humedad 88.0%" in texto
     assert "Media Luna 1.2 mm (2026-07-03)" in texto  # la más reciente, no la primera
     assert "Puerto Rico Hacienda 1.79 m (2026-07-02)" in texto
+
+
+def test_build_ai_context_incluye_oxigeno_disuelto_e_ignora_otras_variables_invemar():
+    """Solo Oxigeno Disuelto viaja al prompt — el resto (salinidad, pH, etc.) queda
+    detrás del tool calidad_agua_estaciones para no inflar el fast path."""
+    snapshot = {
+        **_BASE_SNAPSHOT,
+        "calidad_agua": [
+            {"estacion": "Boca de la Barra", "variable": "Oxigeno Disuelto", "valor": 8.71, "unidad": "mg/L", "rango": "> 8 mg/l"},
+            {"estacion": "Río Córdoba", "variable": "Salinidad", "valor": 12.0, "unidad": "PSU", "rango": "media"},
+        ],
+    }
+    texto = build_ai_context(snapshot)
+    assert "Boca de la Barra 8.71 mg/L (> 8 mg/l)" in texto
+    assert "Río Córdoba" not in texto

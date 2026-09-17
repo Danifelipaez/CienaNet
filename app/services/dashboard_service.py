@@ -16,12 +16,15 @@ from app.models.environmental import SatelliteData
 from app.core.config import settings
 from app.services.dashboard_persistence import (
     _save_ideam_hidro,
+    _save_invemar_calidad,
     _save_satellite,
     _save_weather,
     _upsert_semaphore,
 )
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
 from app.services.ingestion.ideam_hidro import get_nivel_historia, get_precipitacion_historia
+from app.services.ingestion.invemar_calidad import VARIABLES as _INVEMAR_VARIABLES
+from app.services.ingestion.invemar_calidad import get_calidad_agua
 from app.services.ingestion.satellite import get_satellite_data
 from app.services.ingestion.lightning import get_ultimo_nowcast
 from app.services.ingestion.weather import get_convective_forecast, get_weather_forecast
@@ -50,6 +53,9 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         get_precipitacion_historia(_IDEAM_BACKFILL_DAYS),
         get_nivel_historia(_IDEAM_BACKFILL_DAYS),
     )
+    # Cada get_calidad_agua ya cachea 6h de su lado (ver ingestion/invemar_calidad.py)
+    # — este gather solo paga la red la primera vez que vence el caché, no cada refresh.
+    invemar_task = asyncio.gather(*(get_calidad_agua(v) for v in _INVEMAR_VARIABLES))
 
     sat_date = date.today() - timedelta(days=2)
     db_satellite = (
@@ -109,6 +115,7 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     today = date.today()
 
     ideam_precipitacion, ideam_nivel_rio = await ideam_task
+    calidad_agua = [row for filas in await invemar_task for row in filas]
 
     # Persistencia secuencial (una sola sesión async, no concurrent). Cada guardado
     # va envuelto: get_latest_snapshot() es el camino de ESCRITURA — lo llaman el
@@ -136,6 +143,11 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         await _save_ideam_hidro(db, ideam_precipitacion, ideam_nivel_rio)
     except Exception as exc:
         logger.warning("No se pudo guardar respaldo IDEAM en DB: %s", exc)
+        await db.rollback()
+    try:
+        await _save_invemar_calidad(db, calidad_agua)
+    except Exception as exc:
+        logger.warning("No se pudo guardar calidad de agua INVEMAR en DB: %s", exc)
         await db.rollback()
 
     # Después de persistir, para que refleje lo que este mismo ciclo acaba de
@@ -172,6 +184,7 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         "tasajera_weather": tasajera_weather,
         "ideam_precipitacion": ideam_precipitacion,
         "ideam_nivel_rio": ideam_nivel_rio,
+        "calidad_agua": calidad_agua,
         "satellite": satellite_data,
         "water": water,
         "sensors": [

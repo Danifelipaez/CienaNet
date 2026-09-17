@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.services.snapshot_service import read_persisted
+from app.services.snapshot_service import get_calidad_agua_persistida, read_persisted
 
 _TENDENCIAS_VACIAS = {"variables": {}, "lluvia_72h_mm": None}
 
@@ -30,9 +30,9 @@ def _result(scalar=None, scalars_all=None):
     return r
 
 
-def _make_db(weather=None, tasajera=None, satellite=None, semaphore=None, readings=None, ideam=None):
+def _make_db(weather=None, tasajera=None, satellite=None, semaphore=None, readings=None, ideam=None, calidad_agua=None):
     """Orden de `db.execute` dentro de read_persisted: weather CGSM, weather
-    Tasajera, satellite, semaphore, get_latest_readings, ideam."""
+    Tasajera, satellite, semaphore, get_latest_readings, ideam, calidad_agua."""
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
@@ -42,6 +42,7 @@ def _make_db(weather=None, tasajera=None, satellite=None, semaphore=None, readin
             _result(scalar=semaphore),
             _result(scalars_all=readings or []),
             _result(scalars_all=ideam or []),
+            _result(scalars_all=calidad_agua or []),
         ]
     )
     return db
@@ -120,3 +121,33 @@ def test_ipp_ranking_viene_del_semaforo_persistido():
     estado = asyncio.run(read_persisted(db))
     assert estado["ipp_ranking"] == [{"zone": "X", "ipp": 80.0}]
     assert estado["semaphore"]["color"] == "green"
+
+
+def test_calidad_agua_viaja_en_read_persisted():
+    row = MagicMock(
+        estacion="Boca de la Barra", sector="CGSM", variable="Oxigeno Disuelto",
+        valor=8.71, unidad="mg/L", clase=5, rango="> 8 mg/l", lat=10.99, lon=-74.29,
+        fuente_actualizado="2025-08-29T09:31:42",
+    )
+    db = _make_db(calidad_agua=[row])
+    estado = asyncio.run(read_persisted(db))
+    assert estado["calidad_agua"] == [
+        {
+            "estacion": "Boca de la Barra", "sector": "CGSM", "variable": "Oxigeno Disuelto",
+            "valor": 8.71, "unidad": "mg/L", "clase": 5, "rango": "> 8 mg/l",
+            "lat": 10.99, "lon": -74.29, "actualizado": "2025-08-29T09:31:42",
+        }
+    ]
+
+
+def test_get_calidad_agua_persistida_filtra_por_variable():
+    row = MagicMock(
+        estacion="X", sector=None, variable="pH", valor=7.0, unidad="", clase=4,
+        rango="", lat=0, lon=0, fuente_actualizado="",
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_result(scalars_all=[row]))
+    out = asyncio.run(get_calidad_agua_persistida(db, "pH"))
+    assert out[0]["variable"] == "pH"
+    stmt = str(db.execute.call_args.args[0])
+    assert "invemar_calidad_readings.variable" in stmt

@@ -182,8 +182,10 @@ async def handle_incoming_text(
             "Eres el asistente de CienRayas para pescadores artesanales de la "
             "Ciénaga Grande de Santa Marta. Responde en español simple, máximo 4 "
             "oraciones, sin jerga técnica, y termina siempre con una recomendación "
-            "de acción concreta. Usa solo estos datos, no inventes valores: "
-            f"{build_ai_context(estado)}"
+            "de acción concreta. Usa estos datos del presente, no inventes valores: "
+            f"{build_ai_context(estado)} Si la pregunta es sobre el pasado (histórico) "
+            "o necesitas un dato que no está aquí, usa las herramientas disponibles "
+            "en vez de inventar."
         )
         if "camar" in text_lower:
             system += f"\n{camaron_moonrise_hint()}"
@@ -191,6 +193,7 @@ async def handle_incoming_text(
             system=system,
             user=text,
             history=await _recent_history(user.id, db),
+            db=db,
         )
         reply = ai_reply or _NO_ENTENDI
 

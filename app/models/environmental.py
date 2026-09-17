@@ -3,7 +3,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, String, Text, UniqueConstraint, func, text
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -158,6 +158,37 @@ class IdeamHidroReading(Base):
     date: Mapped[date] = mapped_column(Date)
     valor: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class InvemarCalidadReading(Base):
+    """Condición vigente de calidad de agua por estación — INVEMAR/SIICGSM (REDCAM),
+    ver app/services/ingestion/invemar_calidad.py. Un row por (estacion, variable):
+    se sobreescribe en cada refresco (upsert), no es serie histórica — el dato de
+    origen ya es "la condición vigente más reciente" de la fuente, no una campaña
+    con fecha propia que valga la pena versionar como ideam_hidro_readings.
+    """
+
+    __tablename__ = "invemar_calidad_readings"
+    __table_args__ = (
+        UniqueConstraint("estacion", "variable", name="uq_invemar_calidad_estacion_variable"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    estacion: Mapped[str] = mapped_column(String(100))
+    sector: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    variable: Mapped[str] = mapped_column(String(50))
+    valor: Mapped[float] = mapped_column(Float)
+    unidad: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    clase: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rango: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fuente_actualizado: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 

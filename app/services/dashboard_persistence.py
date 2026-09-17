@@ -3,13 +3,14 @@ dashboard_service.get_latest_snapshot() (camino de escritura)."""
 
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.environmental import (
     DailySemaphore,
     IdeamHidroReading,
+    InvemarCalidadReading,
     SatelliteData,
     WeatherSnapshot,
 )
@@ -109,6 +110,47 @@ async def _save_ideam_hidro(db: AsyncSession, precipitacion: list[dict], nivel: 
 
     stmt = pg_insert(IdeamHidroReading).values(rows)
     stmt = stmt.on_conflict_do_nothing(index_elements=["variable", "estacion", "date"])
+    await db.execute(stmt)
+    await db.commit()
+
+
+async def _save_invemar_calidad(db: AsyncSession, rows: list[dict]) -> None:
+    """Upsert de la condición vigente por (estacion, variable) — a diferencia de
+    _save_ideam_hidro (que no pisa un día ya guardado), acá SÍ se sobreescribe:
+    no hay "día" que preservar, el dato de origen ya es el más reciente."""
+    if not rows:
+        return
+
+    values = [
+        {
+            "estacion": r["estacion"],
+            "sector": r.get("sector"),
+            "variable": r["variable"],
+            "valor": r["valor"],
+            "unidad": r.get("unidad"),
+            "clase": r.get("clase"),
+            "rango": r.get("rango"),
+            "lat": r.get("lat"),
+            "lon": r.get("lon"),
+            "fuente_actualizado": r.get("actualizado"),
+        }
+        for r in rows
+    ]
+    stmt = pg_insert(InvemarCalidadReading).values(values)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["estacion", "variable"],
+        set_={
+            "sector": stmt.excluded.sector,
+            "valor": stmt.excluded.valor,
+            "unidad": stmt.excluded.unidad,
+            "clase": stmt.excluded.clase,
+            "rango": stmt.excluded.rango,
+            "lat": stmt.excluded.lat,
+            "lon": stmt.excluded.lon,
+            "fuente_actualizado": stmt.excluded.fuente_actualizado,
+            "updated_at": func.now(),
+        },
+    )
     await db.execute(stmt)
     await db.commit()
 

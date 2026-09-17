@@ -48,6 +48,15 @@ def build_ai_context(snapshot: dict) -> str:
         detalle = "; ".join(f"{est} {v} m ({fecha})" for est, (fecha, v) in nivel.items())
         parts.append(f"Nivel de río IDEAM, última lectura por estación: {detalle}.")
 
+    # Solo oxígeno disuelto en el camino rápido (el más ligado a riesgo de
+    # anoxia/mortandad de peces) — el resto de variables INVEMAR (salinidad, pH,
+    # temperatura, SST) quedan detrás del tool calidad_agua_estaciones para no
+    # inflar el prompt con las 12 estaciones x 5 variables en cada pregunta.
+    oxigeno = [r for r in snapshot.get("calidad_agua") or [] if r.get("variable") == "Oxigeno Disuelto"]
+    if oxigeno:
+        detalle = "; ".join(f"{r['estacion']} {r['valor']} {r['unidad']} ({r['rango']})" for r in oxigeno)
+        parts.append(f"Oxígeno disuelto INVEMAR (REDCAM) por estación: {detalle}.")
+
     return " ".join(parts)
 
 

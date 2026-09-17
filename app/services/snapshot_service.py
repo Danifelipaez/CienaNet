@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.environmental import (
     DailySemaphore,
     IdeamHidroReading,
+    InvemarCalidadReading,
     SatelliteData,
     WeatherSnapshot,
 )
@@ -51,6 +52,32 @@ def _weather_dict(row: WeatherSnapshot | None) -> dict:
         "wind_gust_kmh": row.wind_gust_kmh,
         "precipitation_mm": row.precipitation_mm,
     }
+
+
+async def get_calidad_agua_persistida(db: AsyncSession, variable: str | None = None) -> list[dict]:
+    """Condición vigente por estación INVEMAR/REDCAM ya persistida (upsert de
+    invemar_calidad_readings, ver dashboard_persistence._save_invemar_calidad).
+    Cero llamadas de red — filtrable por variable para no traer las 5 si solo
+    hace falta una (p.ej. el tool calidad_agua_estaciones en ai_tools.py)."""
+    stmt = select(InvemarCalidadReading).order_by(InvemarCalidadReading.estacion)
+    if variable:
+        stmt = stmt.where(InvemarCalidadReading.variable == variable)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [
+        {
+            "estacion": r.estacion,
+            "sector": r.sector,
+            "variable": r.variable,
+            "valor": r.valor,
+            "unidad": r.unidad,
+            "clase": r.clase,
+            "rango": r.rango,
+            "lat": r.lat,
+            "lon": r.lon,
+            "actualizado": r.fuente_actualizado,
+        }
+        for r in rows
+    ]
 
 
 async def read_persisted(db: AsyncSession) -> dict:
@@ -114,6 +141,8 @@ async def read_persisted(db: AsyncSession) -> dict:
         if r.variable == "nivel_m"
     ]
 
+    calidad_agua = await get_calidad_agua_persistida(db)
+
     satellite = {
         "sst_celsius": satellite_row.sst_celsius if satellite_row else None,
         "chlorophyll_mgm3": satellite_row.chlorophyll_mgm3 if satellite_row else None,
@@ -136,6 +165,7 @@ async def read_persisted(db: AsyncSession) -> dict:
         "ipp_ranking": (semaphore_row.ipp_ranking if semaphore_row else None) or [],
         "ideam_precipitacion": ideam_precipitacion,
         "ideam_nivel_rio": ideam_nivel_rio,
+        "calidad_agua": calidad_agua,
         "tendencias": tendencias,
         "senales": {
             "anoxia": anoxia_risk(satellite, _weather_dict(weather_row), water),

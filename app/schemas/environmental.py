@@ -61,6 +61,19 @@ class IdeamNivelPoint(BaseModel):
     nivel_m: float
 
 
+class CalidadAguaEstacion(BaseModel):
+    estacion: str
+    sector: str | None = None
+    variable: str
+    valor: float
+    unidad: str | None = None
+    clase: int | None = None
+    rango: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    actualizado: str | None = None
+
+
 class DashboardSnapshot(BaseModel):
     semaphore: SemaphoreInfo
     weather: WeatherData
@@ -72,6 +85,7 @@ class DashboardSnapshot(BaseModel):
     cyclone_alerts: list[dict]
     ideam_precipitacion: list[IdeamPrecipitacionPoint] = []
     ideam_nivel_rio: list[IdeamNivelPoint] = []
+    calidad_agua: list[CalidadAguaEstacion] = []
     # Procedencia por fuente: "medido" | "cache" | "baseline" | "sin_dato" (satellite
     # trae un sub-dict por campo). Sin framework — ver dashboard_service.get_latest_snapshot.
     origen: dict = {}

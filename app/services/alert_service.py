@@ -16,9 +16,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.environmental import ExternalAlert
+from app.models.environmental import DailySemaphore, ExternalAlert
 from app.models.messaging import AlertLog, User
 from app.services import whatsapp_service
+from app.services.ingestion.alerts_ext import get_cyclone_alerts
+from app.services.ingestion.lightning import get_ultimo_nowcast
 
 logger = logging.getLogger(__name__)
 
@@ -165,3 +167,26 @@ async def maybe_send_storm_alert(tormenta: dict | None, db: AsyncSession) -> Non
     )
     await db.commit()  # libera el lock
     logger.info("Alerta de tormenta (ETA %d min, %s) enviada a %d destinatarios", eta, tormenta["rumbo"], sent_count)
+
+
+async def get_alert_status(db: AsyncSession) -> dict:
+    """Snapshot de alertas de solo lectura — mismo dato que GET /data/alerts, más
+    el nowcast de tormenta por rayos. No dispara envíos ni persiste.
+
+    `tormenta_nowcast` vive en memoria de proceso (lightning.set_ultimo_nowcast,
+    repuesto cada 10 min por _nowcast_refresh): puede venir None tras un reinicio
+    reciente, de ahí el campo `origen_tormenta_nowcast` para no presentarlo como
+    "no hay tormenta" cuando en realidad es "todavía no se sabe".
+    """
+    cyclones = await get_cyclone_alerts()
+    semaphore = (
+        await db.execute(select(DailySemaphore).order_by(desc(DailySemaphore.date)).limit(1))
+    ).scalar_one_or_none()
+    nowcast = get_ultimo_nowcast()
+
+    return {
+        "cyclones": cyclones,
+        "semaphore_color": semaphore.color if semaphore else None,
+        "tormenta_nowcast": nowcast,
+        "origen_tormenta_nowcast": "medido" if nowcast is not None else "sin_dato",
+    }

@@ -28,4 +28,5 @@ Ver `/docs/VIBECODING.md` — incluye plantilla de prompts y flujo de trabajo.
 - `/docs/VIBECODING.md` — Mejores prácticas de desarrollo con IA
 - `/docs/WHATSAPP_API.md` — Integración Meta WhatsApp (webhook, envío, plantillas)
 - `/docs/IOT_SENSORES.md` — Red de sensores ESP32, protocolo, calibración
+- `/docs/AI_TOOLS.md` — Tool-calling del AIProvider: catálogo de consultas históricas/actuales
 - `/docs/DEPLOYMENT.md` — Despliegue (servidor universitario), variables de entorno, runbook
