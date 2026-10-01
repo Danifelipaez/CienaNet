@@ -5,6 +5,9 @@ Se ejecuta al importar conftest (antes de colectar los tests), de modo que
 """
 
 import os
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 os.environ.setdefault("POSTGRES_PRISMA_URL", "postgresql://u:p@localhost:6543/db")
 os.environ.setdefault("POSTGRES_URL_NON_POOLING", "postgresql://u:p@localhost:5432/db")
@@ -13,3 +16,14 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "dummy")
 os.environ.setdefault("SENSOR_API_KEY_SECRET", "dummy-salt")
 os.environ.setdefault("ADMIN_API_KEY", "test-admin-key")
 os.environ.setdefault("WHATSAPP_APP_SECRET", "dummy-app-secret")
+
+
+@pytest.fixture(autouse=True)
+def _sin_red_ideam():
+    """Los consumidores de la alerta IDEAM no salen a la red en los tests
+    (la ingesta en sí se prueba en test_ideam_comunicados.py)."""
+    with (
+        patch("app.services.message_router.get_alerta_ideam", new_callable=AsyncMock, return_value=None),
+        patch("app.api.v1.routers.dashboard.get_alerta_ideam", new_callable=AsyncMock, return_value=None),
+    ):
+        yield

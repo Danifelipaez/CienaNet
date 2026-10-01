@@ -16,4 +16,5 @@ erddapy>=0.8
 feedparser>=6.0
 gsw>=3.6
 h5py>=3.11
+pypdf>=5.0
 ruff>=0.16

@@ -115,12 +115,44 @@ def test_mensaje_de_grupo_se_ignora(client):
     mock_handle.assert_not_awaited()
 
 
-def test_mensaje_sin_texto_se_ignora(client):
-    with patch("app.api.v1.routers.webhook.handle_incoming_text", new_callable=AsyncMock) as mock_handle:
-        resp = client.post(f"{URL}?token=topsecret", json=_payload({"imageMessage": {}}))
+def test_audio_o_foto_responde_que_solo_lee_texto(client):
+    with (
+        patch("app.api.v1.routers.webhook.handle_incoming_text", new_callable=AsyncMock) as mock_handle,
+        patch("app.api.v1.routers.webhook.whatsapp_service.send_text_message", new_callable=AsyncMock) as mock_send,
+    ):
+        resp = client.post(f"{URL}?token=topsecret", json=_payload({"audioMessage": {}}))
+
+    assert resp.json() == {"status": "solo_texto"}
+    mock_handle.assert_not_awaited()
+    assert "solo leo mensajes de texto" in mock_send.call_args.args[1]
+
+
+def test_sticker_o_reaccion_se_ignora_en_silencio(client):
+    with (
+        patch("app.api.v1.routers.webhook.handle_incoming_text", new_callable=AsyncMock) as mock_handle,
+        patch("app.api.v1.routers.webhook.whatsapp_service.send_text_message", new_callable=AsyncMock) as mock_send,
+    ):
+        resp = client.post(f"{URL}?token=topsecret", json=_payload({"reactionMessage": {"text": "👍"}}))
 
     assert resp.json() == {"status": "ignored"}
     mock_handle.assert_not_awaited()
+    mock_send.assert_not_awaited()
+
+
+def test_error_procesando_avisa_al_pescador(client):
+    with (
+        patch("app.api.v1.routers.webhook.AsyncSessionLocal", return_value=_mock_session()),
+        patch(
+            "app.api.v1.routers.webhook.handle_incoming_text",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("DB caída"),
+        ),
+        patch("app.api.v1.routers.webhook.whatsapp_service.send_text_message", new_callable=AsyncMock) as mock_send,
+    ):
+        resp = client.post(f"{URL}?token=topsecret", json=_payload({"conversation": "hola"}))
+
+    assert resp.status_code == 200
+    assert "se me enredó la red" in mock_send.call_args.args[1]
 
 
 def test_evento_distinto_de_messages_upsert_se_ignora(client):

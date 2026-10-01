@@ -13,9 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.security import verify_hmac_meta
-from app.services.message_router import handle_incoming_text
+from app.services import whatsapp_service
+from app.services.message_router import FALLA, SOLO_TEXTO, handle_incoming_text
 
 logger = logging.getLogger(__name__)
+
+# Lo que un pescador manda esperando respuesta. Reacciones, stickers, mensajes
+# borrados (protocolMessage) etc. siguen ignorándose en silencio.
+_MEDIA = ("audioMessage", "imageMessage", "videoMessage", "documentMessage")
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
@@ -98,7 +103,11 @@ async def receive_webhook_evolution(request: Request, token: str = Query(default
         message = data.get("message") or {}
         text_body = message.get("conversation") or (message.get("extendedTextMessage") or {}).get("text")
         if not text_body:
-            return {"status": "ignored"}  # no es texto plano (imagen, audio, sticker...)
+            if any(k in message for k in _MEDIA):
+                # Audio/foto: avisar en vez de dejar al pescador en visto.
+                await whatsapp_service.send_text_message(remote_jid, SOLO_TEXTO)
+                return {"status": "solo_texto"}
+            return {"status": "ignored"}  # sticker, reacción, mensaje borrado...
 
         # JID completo (con dominio), no solo el número: WhatsApp expone algunos
         # contactos como `@lid` (identificador enlazado, privacidad) en vez del
@@ -128,3 +137,5 @@ async def _process_text_message(wa_id: str, nombre: str | None, message: dict, d
         )
     except Exception as exc:
         logger.error("Error procesando mensaje entrante: %s", exc)
+        # Sin esto el pescador queda en visto (send_text_message nunca lanza).
+        await whatsapp_service.send_text_message(wa_id, FALLA)

@@ -19,8 +19,12 @@ async def _hourly_refresh() -> None:
     # local o el servidor universitario, ver settings.run_scheduler).
     from app.services.alert_service import maybe_send_alert
     from app.services.dashboard_service import get_latest_snapshot
+    from app.services.ingestion.ideam_comunicados import get_alerta_ideam
 
     while True:
+        # Primero y por separado: mantiene caliente la alerta IDEAM que muestran el
+        # saludo y "condición" (nunca lanza, ver get_alerta_ideam).
+        await get_alerta_ideam(refrescar=True)
         try:
             async with AsyncSessionLocal() as db:
                 snapshot = await get_latest_snapshot(db)
