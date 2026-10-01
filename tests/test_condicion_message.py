@@ -125,3 +125,12 @@ def test_mensaje_dato_viejo_desplaza_a_tendencia():
     assert "más salada" not in msg
     oraciones = [o for o in msg.split(".") if o.strip()]
     assert len(oraciones) <= 4
+
+
+def test_mensaje_con_alerta_ideam_no_dice_buen_dia():
+    """Semáforo verde (lo medido ahora) + aviso IDEAM de lluvias (pronóstico):
+    "Buen día para salir" se leía contradictorio junto a la alerta."""
+    msg = _mensaje_condicion(_estado(), alerta_ideam=True)
+    assert "Buen día" not in msg
+    assert "aviso del IDEAM" in msg
+    assert "Buen día" in _mensaje_condicion(_estado())

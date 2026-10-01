@@ -100,10 +100,13 @@ async def _log_message(
     await db.commit()
 
 
-async def _linea_alerta_ideam() -> str:
+def _linea_alerta(alerta: dict | None) -> str:
     """'⚠️ Alerta IDEAM: ...' con salto de párrafo, o vacío si no hay comunicado vigente."""
-    alerta = await get_alerta_ideam()
     return f"⚠️ Alerta IDEAM: {alerta['resumen']}.\n\n" if alerta else ""
+
+
+async def _linea_alerta_ideam() -> str:
+    return _linea_alerta(await get_alerta_ideam())
 
 
 def _es_condicion(text_lower: str) -> bool:
@@ -129,7 +132,8 @@ def _formato_whatsapp(texto: str) -> str:
 
 async def _condicion_actual(db: AsyncSession) -> str:
     estado = await read_persisted(db)
-    return f"{_mensaje_condicion(estado)}\n\n{await _linea_alerta_ideam()}".rstrip()
+    alerta = await get_alerta_ideam()
+    return f"{_mensaje_condicion(estado, alerta is not None)}\n\n{_linea_alerta(alerta)}".rstrip()
 
 
 _DONDE_MARKERS = (

@@ -65,11 +65,15 @@ def _frase_tendencia(tendencias: dict) -> str | None:
     return None
 
 
-def _frase_accion(color: str | None) -> str:
+def _frase_accion(color: str | None, alerta_ideam: bool = False) -> str:
     if color == "red":
         return "Mejor espera a que mejoren las condiciones antes de salir."
     if color == "yellow":
         return "Sal con precaución y mantente cerca de la orilla."
+    # El semáforo mide el ahora; la alerta IDEAM es pronóstico — "buen día" junto a
+    # un aviso de lluvias se leía contradictorio.
+    if alerta_ideam:
+        return "Ahora mismo se puede salir, pero ojo con el aviso del IDEAM 👇"
     return "Buen día para salir a pescar."
 
 
@@ -89,8 +93,10 @@ def _frase_anoxia(senales: dict) -> str | None:
     return "El agua está muy verde y sin brisa — podría haber peces muertos de madrugada."
 
 
-def _mensaje_condicion(estado: dict) -> str:
+def _mensaje_condicion(estado: dict, alerta_ideam: bool = False) -> str:
     """Respuesta del bot desde el estado persistido. Pura: sin DB, sin red.
+
+    `alerta_ideam`: hay comunicado IDEAM vigente (el caller lo anexa debajo).
 
     Regla de producto (docs/ONBOARDING_SENIOR_DEV.md:38-43): 3-4 oraciones, sin
     jerga, siempre con una acción concreta.
@@ -115,5 +121,5 @@ def _mensaje_condicion(estado: dict) -> str:
         if tendencia:
             frases.append(tendencia)
 
-    frases.append(_frase_accion(sem.get("color")))
+    frases.append(_frase_accion(sem.get("color"), alerta_ideam))
     return " ".join(frases)
