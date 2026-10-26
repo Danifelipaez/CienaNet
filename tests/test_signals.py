@@ -1,7 +1,15 @@
 """Tests de app/services/signals.py — señales compuestas, siempre marcadas como
 estimación (no medición)."""
 
-from app.services.signals import anoxia_risk, pulso_agua_dulce, tormenta_aproximandose, vendaval_risk
+from datetime import UTC, datetime, timedelta
+
+from app.services.rain_signals import contar_rayos_cerca, lluvia_nowcast, lluvia_outlook
+from app.services.signals import (
+    anoxia_risk,
+    pulso_agua_dulce,
+    tormenta_aproximandose,
+    vendaval_risk,
+)
 
 
 def test_anoxia_alto_con_floracion_calor_y_calma():
@@ -152,3 +160,147 @@ def test_tormenta_acercandose_muy_lento_supera_eta_maximo():
     actual = {"flashes": [_destello(*apenas_mas_cerca, "2026-08-29T18:10:00+00:00")] * 5}
 
     assert tormenta_aproximandose(anterior, actual, *_CGSM, 90) is None
+
+
+# --- Lluvia: nowcast (RRQPE) ---
+
+_AHORA = datetime(2026, 10, 24, 14, 0, tzinfo=UTC)
+
+
+def _feat(caja=0.0, anillo=0.0, nan=0.0, edad_min=10):
+    return {
+        "scan": _AHORA - timedelta(minutes=edad_min),
+        "frac_caja_1mm": caja,
+        "frac_anillo_5mm": anillo,
+        "frac_nan": nan,
+    }
+
+
+def test_lluvia_caja_con_lluvia_es_lloviendo_y_no_inminente():
+    # Falso positivo a evitar: ya llueve encima, aunque el anillo también esté fuerte.
+    out = lluvia_nowcast(_feat(caja=0.30, anillo=0.20), _AHORA)
+    assert out["estado"] == "lloviendo"
+    assert "eta_rango_min" not in out
+
+
+def test_lluvia_anillo_fuerte_con_caja_seca_es_inminente():
+    out = lluvia_nowcast(_feat(caja=0.0, anillo=0.04), _AHORA)
+    assert out["estado"] == "inminente"
+    assert out["eta_rango_min"] == [30, 60]
+    assert out["estimacion"] is True
+
+
+def test_lluvia_anillo_bajo_el_umbral_no_es_inminente():
+    # Falso positivo: 1.9 % del anillo con lluvia fuerte es ruido, no un frente entrando.
+    assert lluvia_nowcast(_feat(anillo=0.019), _AHORA)["estado"] == "sin_lluvia"
+
+
+def test_lluvia_umbrales_son_inclusivos():
+    assert lluvia_nowcast(_feat(anillo=0.02), _AHORA)["estado"] == "inminente"
+    assert lluvia_nowcast(_feat(caja=0.05, anillo=0.02), _AHORA)["estado"] == "lloviendo"
+    # 4.9 % de la caja no cuenta como "lloviendo": una llovizna dispersa no apaga el aviso.
+    assert lluvia_nowcast(_feat(caja=0.049, anillo=0.03), _AHORA)["estado"] == "inminente"
+
+
+def test_lluvia_sin_features_es_sin_dato():
+    assert lluvia_nowcast(None, _AHORA)["estado"] == "sin_dato"
+
+
+def test_lluvia_scan_viejo_es_sin_dato_aunque_el_anillo_este_fuerte():
+    # Falso positivo por dato rancio: un scan de hace 30 min no sirve para un nowcast de 30 min.
+    assert lluvia_nowcast(_feat(anillo=0.10, edad_min=30), _AHORA)["estado"] == "sin_dato"
+    assert lluvia_nowcast(_feat(anillo=0.10, edad_min=25), _AHORA)["estado"] == "inminente"
+
+
+def test_lluvia_muchos_nan_es_sin_dato_aunque_el_anillo_este_fuerte():
+    assert lluvia_nowcast(_feat(anillo=0.10, nan=0.11), _AHORA)["estado"] == "sin_dato"
+    assert lluvia_nowcast(_feat(anillo=0.10, nan=0.10), _AHORA)["estado"] == "inminente"
+
+
+def test_lluvia_features_con_fracciones_none_es_sin_dato():
+    # Todos los píxeles inválidos: _frac devuelve None, no se puede decir "sin_lluvia".
+    assert lluvia_nowcast({**_feat(), "frac_anillo_5mm": None}, _AHORA)["estado"] == "sin_dato"
+
+
+def test_lluvia_tormenta_electrica_por_rayos_no_cambia_el_estado():
+    assert lluvia_nowcast(_feat(anillo=0.04), _AHORA, rayos_100km=3)["tormenta_electrica"] is True
+    out = lluvia_nowcast(_feat(anillo=0.04), _AHORA, rayos_100km=2)
+    assert out["tormenta_electrica"] is False and out["estado"] == "inminente"
+    # Falso negativo a evitar: rayos sin lluvia en anillo no inventan "inminente".
+    assert lluvia_nowcast(_feat(), _AHORA, rayos_100km=50)["estado"] == "sin_lluvia"
+    # Los rayos se siguen reportando aunque el satélite falle.
+    assert lluvia_nowcast(None, _AHORA, rayos_100km=5)["tormenta_electrica"] is True
+
+
+def test_contar_rayos_cerca_respeta_el_radio():
+    cerca = {"lat": _CGSM[0], "lon": _CGSM[1] + 0.5}  # ~54 km
+    lejos = {"lat": _CGSM[0], "lon": _CGSM[1] + 1.5}  # ~160 km
+    assert contar_rayos_cerca([cerca, cerca, lejos], *_CGSM) == 2
+
+
+# --- Lluvia: outlook (GEFS) ---
+
+
+def _ens(por_hora_mm: list[float], n_miembros: int = 31, miembros_con_lluvia: int = 0):
+    """Ensamble de 72 h desde 2026-10-24T00:00: los primeros `miembros_con_lluvia`
+    miembros siguen `por_hora_mm` (mm/h a partir de la etiqueta 01:00); el resto, 0."""
+    horas = [(datetime(2026, 10, 24) + timedelta(hours=h)).isoformat(timespec="minutes") for h in range(72)]
+    llueve = [0.0] + por_hora_mm + [0.0] * (71 - len(por_hora_mm))
+    return {
+        "times": horas,
+        "miembros": [llueve if k < miembros_con_lluvia else [0.0] * 72 for k in range(n_miembros)],
+        "origen": "medido",
+    }
+
+
+_T0 = datetime(2026, 10, 24, 0, 0, tzinfo=UTC)
+
+
+def test_outlook_0_de_31_miembros_es_bajo():
+    out = lluvia_outlook(_ens([2.0] * 24, miembros_con_lluvia=0), _T0)
+    assert out["nivel"] == "bajo" and out["prob_6h"] == 0.0 and out["prob_24h"] == 0.0
+    assert out["n_miembros"] == 31 and out["estimacion"] is True
+
+
+def test_outlook_31_de_31_miembros_es_alto():
+    out = lluvia_outlook(_ens([1.0] * 24, miembros_con_lluvia=31), _T0)  # 6 mm por bloque
+    assert out["nivel"] == "alto" and out["prob_6h"] == 1.0 and out["prob_24h"] == 1.0
+
+
+def test_outlook_lluvia_debil_no_cuenta():
+    # 31/31 miembros con 4 mm en 6 h (< 5 mm): falso positivo si se contara.
+    out = lluvia_outlook(_ens([4 / 6] * 24, miembros_con_lluvia=31), _T0)
+    assert out["nivel"] == "bajo"
+
+
+def test_outlook_niveles_en_los_cortes():
+    # 9/31 = 0.29 bajo ; 10/31 = 0.32 medio ; 16/31 = 0.52 alto
+    assert lluvia_outlook(_ens([1.0] * 6, miembros_con_lluvia=9), _T0)["nivel"] == "bajo"
+    assert lluvia_outlook(_ens([1.0] * 6, miembros_con_lluvia=10), _T0)["nivel"] == "medio"
+    assert lluvia_outlook(_ens([1.0] * 6, miembros_con_lluvia=16), _T0)["nivel"] == "alto"
+
+
+def test_outlook_distingue_6h_de_24h():
+    # Lluvia solo entre +12 h y +18 h: prob_6h = 0, prob_24h = 1.
+    por_hora = [0.0] * 12 + [1.0] * 6
+    out = lluvia_outlook(_ens(por_hora, miembros_con_lluvia=31), _T0)
+    assert out["prob_6h"] == 0.0 and out["prob_24h"] == 1.0 and out["nivel"] == "alto"
+
+
+def test_outlook_fuera_de_24h_no_cuenta():
+    out = lluvia_outlook(_ens([0.0] * 24 + [2.0] * 6, miembros_con_lluvia=31), _T0)
+    assert out["prob_6h"] == 0.0 and out["prob_24h"] == 0.0
+
+
+def test_outlook_un_bloque_parcial_no_opina():
+    ens = _ens([1.0] * 24, miembros_con_lluvia=31)
+    # Pronóstico que termina 3 h después de "ahora": no alcanza para un bloque de 6 h.
+    corto = {**ens, "times": ens["times"][:4], "miembros": [m[:4] for m in ens["miembros"]]}
+    assert lluvia_outlook(corto, _T0)["nivel"] is None
+
+
+def test_outlook_sin_dato_no_opina():
+    assert lluvia_outlook({"times": [], "miembros": [], "origen": "sin_dato"}, _T0) == {
+        "nivel": None,
+        "estimacion": True,
+    }

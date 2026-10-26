@@ -59,3 +59,27 @@ def test_build_ai_context_incluye_oxigeno_disuelto_e_ignora_otras_variables_inve
     texto = build_ai_context(snapshot)
     assert "Boca de la Barra 8.71 mg/L (> 8 mg/l)" in texto
     assert "Río Córdoba" not in texto
+
+
+def test_build_ai_context_menciona_lluvia_inminente_como_estimacion():
+    snapshot = {
+        **_BASE_SNAPSHOT,
+        "senales": {
+            "lluvia": {
+                "outlook": {"nivel": "alto", "prob_6h": 0.6, "prob_24h": 0.8},
+                "nowcast": {"estado": "inminente"},
+                "sinoptico": None,
+            }
+        },
+    }
+    texto = build_ai_context(snapshot)
+    assert "inminente" in texto and "NO certezas" in texto
+
+
+def test_build_ai_context_omite_lluvia_si_no_hay_senal():
+    snapshot = {
+        **_BASE_SNAPSHOT,
+        "senales": {"lluvia": {"outlook": {"nivel": "bajo"}, "nowcast": {"estado": "sin_lluvia"}}},
+    }
+    assert "Lluvia sobre la Ciénaga" not in build_ai_context(snapshot)
+    assert "Lluvia sobre la Ciénaga" not in build_ai_context(_BASE_SNAPSHOT)

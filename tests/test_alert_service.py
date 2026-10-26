@@ -6,7 +6,12 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.alert_service import maybe_send_alert, maybe_send_storm_alert, send_manual_alert
+from app.services.alert_service import (
+    maybe_send_alert,
+    maybe_send_rain_alert,
+    maybe_send_storm_alert,
+    send_manual_alert,
+)
 
 
 def _result(scalar=None, scalars_all=None):
@@ -179,3 +184,85 @@ def test_manual_alert_envia_a_todos_sin_dedup():
     assert added.alert_type == "manual"
     assert added.destinatarios_count == 1
     db.commit.assert_awaited_once()
+
+
+# --- Alerta de lluvia (nowcast RRQPE) ---
+
+_INMINENTE = {"estado": "inminente", "tormenta_electrica": False}
+
+
+def _enviar_lluvia(lluvia, db):
+    with patch(
+        "app.services.whatsapp_service.send_template_message",
+        new_callable=AsyncMock,
+        return_value=True,
+    ) as mock_send:
+        asyncio.run(maybe_send_rain_alert(lluvia, db))
+    return mock_send
+
+
+def test_lluvia_none_no_consulta_ni_bloquea():
+    db = AsyncMock()
+    db.execute = AsyncMock()
+
+    asyncio.run(maybe_send_rain_alert(None, db))
+
+    db.execute.assert_not_awaited()
+
+
+def test_lluvia_solo_inminente_envia():
+    # Falso positivo a evitar: lloviendo (tarde), sin_lluvia y sin_dato nunca empujan.
+    for estado in ("lloviendo", "sin_lluvia", "sin_dato"):
+        db = AsyncMock()
+        db.execute = AsyncMock()
+        mock_send = _enviar_lluvia({"estado": estado, "tormenta_electrica": True}, db)
+        db.execute.assert_not_awaited()
+        mock_send.assert_not_awaited()
+
+
+def test_lluvia_inminente_envia_y_registra_con_alert_type_lluvia():
+    user = MagicMock(wa_id="+570000000")
+    db = _make_storm_db(last_created_at=None, recipients=[user])
+
+    mock_send = _enviar_lluvia(_INMINENTE, db)
+
+    mock_send.assert_awaited_once()
+    assert mock_send.await_args.args[1] == "alerta_lluvia"
+    mensaje = mock_send.await_args.kwargs["params"][0]
+    assert "Lluvia fuerte" in mensaje and "eléctrica" not in mensaje
+    external_alert, alert_log = (call.args[0] for call in db.add.call_args_list)
+    assert external_alert.alert_type == "lluvia" and external_alert.source == "goes19-rrqpe"
+    assert alert_log.alert_type == "lluvia" and alert_log.destinatarios_count == 1
+    db.commit.assert_awaited_once()
+
+
+def test_lluvia_con_tormenta_electrica_lo_dice():
+    user = MagicMock(wa_id="+570000000")
+    db = _make_storm_db(last_created_at=None, recipients=[user])
+
+    mock_send = _enviar_lluvia({**_INMINENTE, "tormenta_electrica": True}, db)
+
+    assert "tormenta eléctrica" in mock_send.await_args.kwargs["params"][0]
+
+
+def test_lluvia_histeresis_de_60_min_evita_el_segundo_push():
+    # Falso positivo a evitar: el anillo sigue encendido 10 min después, mismo sistema.
+    reciente = datetime.now(UTC) - timedelta(minutes=10)
+    db = _make_storm_db(last_created_at=reciente, recipients=[])
+
+    mock_send = _enviar_lluvia(_INMINENTE, db)
+
+    mock_send.assert_not_awaited()
+    db.add.assert_not_called()
+    db.commit.assert_awaited_once()  # libera el advisory lock
+
+
+def test_lluvia_pasada_la_histeresis_vuelve_a_enviar():
+    # Falso negativo a evitar: una segunda tanda de lluvia horas después SÍ avisa.
+    antigua = datetime.now(UTC) - timedelta(minutes=61)
+    user = MagicMock(wa_id="+570000000")
+    db = _make_storm_db(last_created_at=antigua, recipients=[user])
+
+    mock_send = _enviar_lluvia(_INMINENTE, db)
+
+    mock_send.assert_awaited_once()

@@ -84,6 +84,17 @@ def build_ai_context(snapshot: dict, vendaval: dict | None = None) -> str:
             "estimación de modelo, no una certeza."
         )
 
+    lluvia = (snapshot.get("senales") or {}).get("lluvia") or {}
+    estado = (lluvia.get("nowcast") or {}).get("estado")
+    outlook = lluvia.get("outlook") or {}
+    if estado in ("lloviendo", "inminente") or outlook.get("nivel") in ("medio", "alto"):
+        parts.append(
+            f"Lluvia sobre la Ciénaga (estimaciones, NO certezas): ahora {estado or 'sin dato'} "
+            "(satélite, 10-60 min; 'inminente' = lluvia fuerte llegando en ~30-60 min); "
+            f"probabilidad de lluvia fuerte en 6h {outlook.get('prob_6h')} y en 24h {outlook.get('prob_24h')} "
+            "(modelo, falla seguido). Menciónalo si preguntan por lluvia o salir a pescar."
+        )
+
     return " ".join(parts)
 
 
