@@ -119,6 +119,27 @@ def test_features_from_bytes_lee_solo_la_ventana():
     assert f["frac_nan"] == 0.0
 
 
+def test_features_from_bytes_int16_con_unsigned_se_lee_como_uint16():
+    # Variante int16 + _Unsigned (relleno -1 == 65535): 40000 (61 mm/h) en int16 sería negativo
+    # y el relleno no se reconocería.
+    raw = np.full(rn.VENTANA_SHAPE, 40000, dtype=np.uint16)
+    raw.flat[np.flatnonzero(rn._MASK_CAJA)[:52]] = 65535  # 52 px de la caja sin dato
+    full = np.zeros((rn._J1 + 5, rn._I1 + 5), dtype=np.uint16)
+    full[rn._J0 : rn._J1, rn._I0 : rn._I1] = raw
+    with h5py.File("mem.h5", "w", driver="core", backing_store=False) as f:
+        ds = f.create_dataset("RRQPE", data=full.view(np.int16))
+        ds.attrs["scale_factor"] = np.array([_SCALE], dtype="float32")
+        ds.attrs["add_offset"] = np.array([0.0], dtype="float32")
+        ds.attrs["_FillValue"] = np.array([-1], dtype="int16")
+        ds.attrs["_Unsigned"] = "true"
+        f.flush()
+        data = f.id.get_file_image()
+    f = rn._features_from_bytes(data)
+    assert f["frac_caja_1mm"] == 1.0  # 40000 * scale = 61 mm/h, no negativo
+    assert f["frac_anillo_5mm"] == 1.0
+    assert abs(f["frac_nan"] - 52 / (rn._MASK_CAJA.sum() + rn._MASK_ANILLO.sum())) < 1e-6
+
+
 _KEYS = [
     f"ABI-L2-RRQPEF/2026/299/07/OR_ABI-L2-RRQPEF-M6_G19_s202629907{m}0218_e0_c0.nc"
     for m in ("00", "10", "20")

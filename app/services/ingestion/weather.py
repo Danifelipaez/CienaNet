@@ -169,6 +169,22 @@ async def get_convective_forecast(
 
 _ENSEMBLE_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
 _ensemble_cache: dict[tuple[float, float], dict] = {}
+_FALLO_TTL = 300.0  # 5 min: tras una falla, no reintentar (3 intentos + sleeps) en cada request
+_ensemble_fallo: dict[tuple[float, float], float] = {}
+
+
+def _ensemble_fallback(key: tuple[float, float]) -> dict:
+    cached = _ensemble_cache.get(key)
+    if cached:
+        return {**cached["data"], "origen": "cache"}
+    return {"times": [], "miembros": [], "origen": "sin_dato"}
+
+
+def get_rain_ensemble_cacheado() -> dict | None:
+    """Último ensamble de la CGSM ya en memoria, sin red (None si nunca se bajó).
+    Para caminos de solo lectura como snapshot_service.read_persisted."""
+    cached = _ensemble_cache.get((settings.cienaga_lat, settings.cienaga_lon))
+    return cached["data"] if cached else None
 
 
 async def get_rain_ensemble(lat: float | None = None, lon: float | None = None) -> dict:
@@ -188,6 +204,9 @@ async def get_rain_ensemble(lat: float | None = None, lon: float | None = None) 
     cached = _ensemble_cache.get(key)
     if cached and now - cached["ts"] < _TTL:
         return cached["data"]
+    fallo = _ensemble_fallo.get(key)
+    if fallo is not None and now - fallo < _FALLO_TTL:
+        return _ensemble_fallback(key)
 
     params = {
         "latitude": lat,
@@ -210,6 +229,7 @@ async def get_rain_ensemble(lat: float | None = None, lon: float | None = None) 
                 raise ValueError("respuesta sin miembros de precipitación")
             result = {"times": hourly["time"], "miembros": miembros, "origen": "medido"}
             _ensemble_cache[key] = {"data": result, "ts": now}
+            _ensemble_fallo.pop(key, None)
             return result
         except Exception as exc:
             last_exc = exc
@@ -217,6 +237,5 @@ async def get_rain_ensemble(lat: float | None = None, lon: float | None = None) 
                 await asyncio.sleep(1 + attempt)
 
     logger.warning("Ensamble GEFS Open-Meteo no disponible (%s, %s): %s", lat, lon, last_exc)
-    if cached:
-        return {**cached["data"], "origen": "cache"}
-    return {"times": [], "miembros": [], "origen": "sin_dato"}
+    _ensemble_fallo[key] = now
+    return _ensemble_fallback(key)

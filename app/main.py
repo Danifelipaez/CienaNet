@@ -56,7 +56,7 @@ async def _nowcast_refresh() -> None:
     anterior: dict | None = None
     rayos: list[tuple[datetime, int]] = []
     while True:
-        actual: dict = {"flashes": [], "origen": "sin_dato"}  # si get_lightning_flashes revienta
+        actual: dict = {"flashes": [], "cerca": [], "origen": "sin_dato"}  # si get_lightning_flashes revienta
         try:
             actual = await get_lightning_flashes()
             resultado = tormenta_aproximandose(
@@ -71,7 +71,7 @@ async def _nowcast_refresh() -> None:
         try:
             ahora = datetime.now(UTC)
             if actual.get("origen") == "medido":  # "cache" repetiría los destellos del ciclo previo
-                n = contar_rayos_cerca(actual["flashes"], settings.cienaga_lat, settings.cienaga_lon)
+                n = contar_rayos_cerca(actual["cerca"], settings.cienaga_lat, settings.cienaga_lon)
                 rayos.append((ahora, n))
             rayos = [(t, n) for t, n in rayos if ahora - t <= timedelta(minutes=30)]
             lluvia = lluvia_nowcast(await get_rain_features(), ahora, sum(n for _, n in rayos))

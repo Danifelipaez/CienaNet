@@ -72,7 +72,14 @@ async def get_cyclone_alerts() -> list[dict]:
 TWD_URL = "https://tgftp.nws.noaa.gov/data/raw/ax/axnt20.knhc.twdat.txt"
 TWD_URL_HTML = "https://www.nhc.noaa.gov/text/MIATWDAT.shtml"
 _TWD_TTL = 3600.0  # el TWD sale cada 6 h (00/06/12/18 UTC)
-_twd_cache: dict = {"data": None, "ts": 0.0}
+_twd_cache: dict = {"data": None, "ts": 0.0, "fallo_ts": None}
+_TWD_FALLO_TTL = 300.0  # 5 min: tras una falla, no volver a pedir en cada request
+
+
+def get_sinoptico_cacheado() -> dict | None:
+    """Último TWD parseado ya en memoria, sin red (None si nunca se bajó).
+    Para caminos de solo lectura como snapshot_service.read_persisted."""
+    return _twd_cache["data"]
 
 _SECCION_RE = re.compile(r"^\s*(?:\.{3})?\s*([A-Z][A-Z /,\-]{3,}?)\s*(?:\.{3})?\s*$", re.MULTILINE)
 _ORACION_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
@@ -189,6 +196,9 @@ async def get_sistemas_sinopticos() -> dict | None:
     now = time.monotonic()
     if _twd_cache["data"] is not None and now - _twd_cache["ts"] < _TWD_TTL:
         return _twd_cache["data"]
+    fallo = _twd_cache["fallo_ts"]
+    if fallo is not None and now - fallo < _TWD_FALLO_TTL:
+        return _twd_cache["data"]
     for url in (TWD_URL, TWD_URL_HTML):
         try:
             async with httpx.AsyncClient(timeout=10) as client:
@@ -198,8 +208,9 @@ async def get_sistemas_sinopticos() -> dict | None:
             if "TROPICAL WEATHER DISCUSSION" not in texto.upper():
                 raise ValueError("respuesta que no parece un TWD")
             result = parse_twd(texto)
-            _twd_cache["data"], _twd_cache["ts"] = result, now
+            _twd_cache["data"], _twd_cache["ts"], _twd_cache["fallo_ts"] = result, now, None
             return result
         except Exception as exc:
             logger.warning("NHC TWD no disponible (%s): %s", url.split("/")[2], exc)
+    _twd_cache["fallo_ts"] = now
     return _twd_cache["data"]

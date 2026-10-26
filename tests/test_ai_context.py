@@ -83,3 +83,23 @@ def test_build_ai_context_omite_lluvia_si_no_hay_senal():
     }
     assert "Lluvia sobre la Ciénaga" not in build_ai_context(snapshot)
     assert "Lluvia sobre la Ciénaga" not in build_ai_context(_BASE_SNAPSHOT)
+
+
+def _texto_lluvia(nowcast: dict, outlook: dict) -> str:
+    snapshot = {**_BASE_SNAPSHOT, "senales": {"lluvia": {"outlook": outlook, "nowcast": nowcast}}}
+    texto = build_ai_context(snapshot)
+    return texto[texto.index("Lluvia sobre la Ciénaga") :]
+
+
+def test_build_ai_context_lluvia_con_probabilidades_en_porcentaje():
+    texto = _texto_lluvia({"estado": "inminente"}, {"nivel": "alto", "prob_6h": 0.62, "prob_24h": 0.8})
+    assert "en 6h 62 %" in texto and "en 24h 80 %" in texto
+    assert "0.62" not in texto
+
+
+def test_build_ai_context_lluvia_no_imprime_none_ni_guion_bajo():
+    texto = _texto_lluvia({"estado": "sin_lluvia"}, {"nivel": "medio", "prob_6h": None, "prob_24h": 0.4})
+    assert "None" not in texto and "_" not in texto
+    assert "ahora sin lluvia" in texto and "en 24h 40 %" in texto and "en 6h" not in texto
+    sin_nada = _texto_lluvia({"estado": "inminente"}, {})
+    assert "None" not in sin_nada and "probabilidad" not in sin_nada

@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _BUCKET_URL = "https://noaa-goes19.s3.amazonaws.com"
 _TTL = 300.0  # 5 min
+_CERCA_DEG = 1.0  # ±1° (~110 km) alrededor de la CGSM: cubre el radio de 100 km de contar_rayos_cerca
 
 _cache: dict | None = None
 _cache_ts = 0.0
@@ -91,23 +92,30 @@ def _decode_flash_times(var: h5py.Dataset, epoch: datetime) -> list[datetime]:
     return [epoch + timedelta(seconds=v * scale + offset) for v in raw]
 
 
-def _flashes_from_bytes(data: bytes) -> list[dict]:
+def _flashes_from_bytes(data: bytes) -> tuple[list[dict], list[dict]]:
+    """(destellos en el corredor, destellos en ±_CERCA_DEG alrededor de la CGSM)."""
     with h5py.File(io.BytesIO(data), "r") as f:
         lats = f["flash_lat"][:].tolist()
         lons = f["flash_lon"][:].tolist()
         var = f["flash_time_offset_of_first_event"]
         times = _decode_flash_times(var, _file_epoch(var))
-    return [
-        {"lat": lat, "lon": lon, "timestamp": t.isoformat()}
-        for lat, lon, t in zip(lats, lons, times, strict=True)
-        if settings.corredor_lat_min <= lat <= settings.corredor_lat_max
-        and settings.corredor_lon_min <= lon <= settings.corredor_lon_max
-    ]
+    corredor, cerca = [], []
+    for lat, lon, t in zip(lats, lons, times, strict=True):
+        flash = {"lat": lat, "lon": lon, "timestamp": t.isoformat()}
+        if settings.corredor_lat_min <= lat <= settings.corredor_lat_max and (
+            settings.corredor_lon_min <= lon <= settings.corredor_lon_max
+        ):
+            corredor.append(flash)
+        if abs(lat - settings.cienaga_lat) <= _CERCA_DEG and abs(lon - settings.cienaga_lon) <= _CERCA_DEG:
+            cerca.append(flash)
+    return corredor, cerca
 
 
 async def get_lightning_flashes() -> dict:
     """Retorna los destellos recientes (`settings.glm_files_per_ciclo`
-    archivos, ~1 min de datos) sobre el corredor de aproximación a la CGSM.
+    archivos, ~1 min de datos) sobre el corredor de aproximación a la CGSM
+    (`flashes`) y, aparte, los de la caja ±1° alrededor de la CGSM (`cerca`,
+    para contar rayos a <=100 km: el corredor llega solo ~49 km al norte).
 
     Mismo patrón que weather.py: reintentos con backoff, fallback al último
     resultado bueno, `origen: "sin_dato"` si todo falla — nunca inventa.
@@ -123,11 +131,13 @@ async def get_lightning_flashes() -> dict:
             async with httpx.AsyncClient(timeout=15) as client:
                 keys = await _recent_keys(client, settings.glm_files_per_ciclo)
                 responses = await asyncio.gather(*(client.get(f"{_BUCKET_URL}/{k}") for k in keys))
-            flashes = []
+            flashes, cerca = [], []
             for resp in responses:
                 resp.raise_for_status()
-                flashes.extend(_flashes_from_bytes(resp.content))
-            result = {"flashes": flashes, "origen": "medido"}
+                corredor, alrededor = _flashes_from_bytes(resp.content)
+                flashes.extend(corredor)
+                cerca.extend(alrededor)
+            result = {"flashes": flashes, "cerca": cerca, "origen": "medido"}
             _cache, _cache_ts = result, now
             return result
         except Exception as exc:
@@ -138,4 +148,4 @@ async def get_lightning_flashes() -> dict:
     logger.warning("GOES-19 GLM no disponible tras reintentos: %s", last_exc)
     if _cache:
         return {**_cache, "origen": "cache"}
-    return {"flashes": [], "origen": "sin_dato"}
+    return {"flashes": [], "cerca": [], "origen": "sin_dato"}

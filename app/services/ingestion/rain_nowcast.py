@@ -110,7 +110,9 @@ def _frac(tasa: np.ndarray, mask: np.ndarray, umbral_mm_h: float) -> float | Non
     return float((v >= umbral_mm_h).mean()) if v.size else None
 
 
-def features_from_raw(raw: np.ndarray, scale: float = 0.00152602) -> dict:
+def features_from_raw(
+    raw: np.ndarray, scale: float = 0.00152602, offset: float = 0.0, fill: int = _SIN_DATO_RAW
+) -> dict:
     """Features de un scan a partir de la ventana cruda uint16 (`VENTANA_SHAPE`).
 
     `frac_nan` se mide sobre caja+anillo (lo que la regla usa), no sobre toda la
@@ -118,7 +120,7 @@ def features_from_raw(raw: np.ndarray, scale: float = 0.00152602) -> dict:
     función que usa scripts/gen_rrqpe_fixture.py, así el test de replay mide el
     código de producción y no una réplica.
     """
-    tasa = np.where(raw == _SIN_DATO_RAW, np.nan, raw.astype("float32") * scale)
+    tasa = np.where(raw == fill, np.nan, raw.astype("float32") * scale + offset)
     return {
         "frac_caja_1mm": _frac(tasa, _MASK_CAJA, 1.0),
         "frac_anillo_5mm": _frac(tasa, _MASK_ANILLO, 5.0),
@@ -140,7 +142,14 @@ def _features_from_bytes(data: bytes) -> dict:
         ds = f["RRQPE"]
         raw = ds[_J0:_J1, _I0:_I1]
         scale = float(ds.attrs["scale_factor"][0])
-    return features_from_raw(raw, scale)
+        offset = float(ds.attrs["add_offset"][0]) if "add_offset" in ds.attrs else 0.0
+        fill = int(ds.attrs["_FillValue"][0]) if "_FillValue" in ds.attrs else _SIN_DATO_RAW
+        # El RRQPE real ya viene uint16 (sin _Unsigned); esto cubre una variante
+        # int16 + `_Unsigned` como la de lightning.py::_decode_flash_times.
+        if raw.dtype.kind == "i" and ds.attrs.get("_Unsigned") in (b"true", "true"):
+            raw = raw.view(f"u{raw.dtype.itemsize}")
+            fill %= 1 << (raw.dtype.itemsize * 8)
+    return features_from_raw(raw, scale, offset, fill)
 
 
 async def _latest_key(client: httpx.AsyncClient) -> str | None:

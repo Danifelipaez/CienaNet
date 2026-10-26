@@ -250,6 +250,7 @@ def _mock_twd(textos_por_url: dict[str, str | Exception]):
 def _limpiar_twd():
     alerts_ext._twd_cache["data"] = None
     alerts_ext._twd_cache["ts"] = 0.0
+    alerts_ext._twd_cache["fallo_ts"] = None
 
 
 def test_get_sistemas_sinopticos_usa_el_texto_crudo():
@@ -285,6 +286,17 @@ def test_get_sistemas_sinopticos_si_todo_falla_es_none_o_el_ultimo_resultado():
     alerts_ext._twd_cache["data"], alerts_ext._twd_cache["ts"] = previo, -1e9  # vencido
     with patch.object(alerts_ext.httpx, "AsyncClient", factory):
         assert asyncio.run(alerts_ext.get_sistemas_sinopticos()) == previo
+
+
+def test_get_sistemas_sinopticos_tras_una_falla_no_reintenta_dentro_del_cache_negativo():
+    _limpiar_twd()
+    falla = Exception("boom")
+    factory, client = _mock_twd({alerts_ext.TWD_URL: falla, alerts_ext.TWD_URL_HTML: falla})
+    with patch.object(alerts_ext.httpx, "AsyncClient", factory):
+        asyncio.run(alerts_ext.get_sistemas_sinopticos())
+        asyncio.run(alerts_ext.get_sistemas_sinopticos())  # 2ª: dentro de los 5 min
+
+    assert client.get.await_count == 2  # solo la 1ª ronda (url cruda + html)
 
 
 def test_get_sistemas_sinopticos_rechaza_respuestas_que_no_son_un_twd():

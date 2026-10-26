@@ -26,6 +26,7 @@ def setup_function():
     weather._cache.clear()
     weather._forecast_cache.clear()
     weather._ensemble_cache.clear()
+    weather._ensemble_fallo.clear()
 
 
 def test_get_weather_forecast_incluye_rafaga():
@@ -240,3 +241,18 @@ def test_get_rain_ensemble_fallback_a_cache_vencido():
         out = asyncio.run(weather.get_rain_ensemble(3.33, 3.33))
 
     assert out["origen"] == "cache" and len(out["miembros"]) == 31
+
+
+def test_get_rain_ensemble_tras_una_falla_no_reintenta_dentro_del_cache_negativo():
+    factory, client = _fake_client_hourly(hourly={})
+    client.get = AsyncMock(side_effect=Exception("boom"))
+    with (
+        patch.object(weather.httpx, "AsyncClient", factory),
+        patch.object(weather.asyncio, "sleep", new_callable=AsyncMock),
+    ):
+        asyncio.run(weather.get_rain_ensemble(9.0, 6.0))
+        llamadas = client.get.await_count
+        out = asyncio.run(weather.get_rain_ensemble(9.0, 6.0))  # 2ª: dentro de los 5 min
+
+    assert llamadas == 3 and client.get.await_count == 3  # sin nuevos intentos
+    assert out["origen"] == "sin_dato"
