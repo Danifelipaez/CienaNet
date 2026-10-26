@@ -21,6 +21,10 @@ from app.models.environmental import (
     SatelliteData,
     WeatherSnapshot,
 )
+from app.services.ingestion.alerts_ext import get_sinoptico_cacheado
+from app.services.ingestion.rain_nowcast import get_ultimo_lluvia
+from app.services.ingestion.weather import get_rain_ensemble_cacheado
+from app.services.rain_signals import lluvia_outlook
 from app.services.sensor_service import aggregate_sensor_readings, get_latest_readings
 from app.services.signals import anoxia_risk, pulso_agua_dulce
 from app.services.trends import get_trends
@@ -172,6 +176,13 @@ async def read_persisted(db: AsyncSession) -> dict:
             "pulso_agua_dulce": pulso_agua_dulce(
                 tendencias.get("lluvia_72h_mm"), water.get("salinity_psu")
             ),
+            # Solo lo que el scheduler ya dejó en memoria (sin red): el nowcast
+            # lo repone _nowcast_refresh cada 10 min; ensamble y TWD, el refresco horario.
+            "lluvia": {
+                "outlook": lluvia_outlook(get_rain_ensemble_cacheado() or {}, datetime.now(UTC)),
+                "nowcast": get_ultimo_lluvia(),
+                "sinoptico": get_sinoptico_cacheado(),
+            },
         },
         "edad_horas": {
             "weather": _horas_desde(weather_row.timestamp) if weather_row else None,

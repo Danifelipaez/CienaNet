@@ -1,9 +1,10 @@
-"""Envía alertas proactivas por WhatsApp: cambio de color del semáforo y
-tormenta acercándose (nowcast por rayos, ver docs/ALERTAS_VENDAVAL.md).
+"""Envía alertas proactivas por WhatsApp: cambio de color del semáforo,
+tormenta acercándose (nowcast por rayos, ver docs/ALERTAS_VENDAVAL.md) y lluvia
+inminente (nowcast satelital RRQPE, ver docs/ALERTAS_LLUVIA.md).
 
 maybe_send_alert() se llama tras cada refresco horario (app/main.py::_hourly_refresh);
-maybe_send_storm_alert() tras cada ciclo de nowcast de 10 min
-(app/main.py::_nowcast_refresh). Ambas comparten `alert_log` como bitácora,
+maybe_send_storm_alert() y maybe_send_rain_alert() tras cada ciclo de nowcast de
+10 min (app/main.py::_nowcast_refresh). Todas comparten `alert_log` como bitácora,
 pero cada una deduplica solo contra sus propias filas (`alert_type`,
 migración 013) — si compartieran el "último registro sin filtrar", una
 alerta de tormenta intercalada haría pensar a maybe_send_alert() que el color
@@ -16,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.environmental import DailySemaphore, ExternalAlert
 from app.models.messaging import AlertLog, User
 from app.services import whatsapp_service
@@ -167,6 +169,72 @@ async def maybe_send_storm_alert(tormenta: dict | None, db: AsyncSession) -> Non
     )
     await db.commit()  # libera el lock
     logger.info("Alerta de tormenta (ETA %d min, %s) enviada a %d destinatarios", eta, tormenta["rumbo"], sent_count)
+
+
+# ponytail: template propio, igual que los otros — crear y aprobar `alerta_lluvia`
+# en Meta Business Manager antes de que el envío funcione en producción.
+_RAIN_ALERT_TEMPLATE = "alerta_lluvia"
+_RAIN_ALERT_LOCK_KEY = "cienanet_bot:alert_service:maybe_send_rain_alert"
+
+
+async def maybe_send_rain_alert(lluvia: dict | None, db: AsyncSession) -> None:
+    """Si rain_signals.lluvia_nowcast dice "inminente", notifica a suscritos. "lloviendo"
+    (ya es tarde), "sin_lluvia" y "sin_dato" no empujan: con dato dudoso se calla.
+
+    Histéresis `settings.lluvia_dedup_min` (60 min) contra el último AlertLog
+    "lluvia": el anillo puede seguir encendido varios scans y no debe reenviarse
+    cada 10 min. Mismo advisory lock + dedup por tipo que maybe_send_storm_alert.
+    """
+    if lluvia is None or lluvia.get("estado") != "inminente":
+        return  # ni siquiera vale la pena el advisory lock
+
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": _RAIN_ALERT_LOCK_KEY})
+
+    last = (
+        await db.execute(
+            select(AlertLog)
+            .where(AlertLog.alert_type == "lluvia")
+            .order_by(desc(AlertLog.created_at))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    now = datetime.now(UTC)
+    if last and last.created_at and now - last.created_at < timedelta(minutes=settings.lluvia_dedup_min):
+        await db.commit()  # libera el lock; ya se avisó hace poco
+        return
+
+    mensaje = "Lluvia fuerte acercándose a la Ciénaga, en ~30 a 60 min."
+    if lluvia.get("tormenta_electrica"):
+        mensaje += " Con tormenta eléctrica: no te quedes en el agua."
+    mensaje += " Ve a tierra y asegura tu embarcación."
+
+    recipients = (await db.execute(select(User).where(User.alertas_activas.is_(True)))).scalars().all()
+    sent_count = 0
+    for user in recipients:
+        if await whatsapp_service.send_template_message(user.wa_id, _RAIN_ALERT_TEMPLATE, params=[mensaje]):
+            sent_count += 1
+
+    db.add(
+        ExternalAlert(
+            source="goes19-rrqpe",
+            alert_type="lluvia",
+            title="Lluvia fuerte inminente en la Ciénaga",
+            description=mensaje,
+        )
+    )
+    db.add(
+        AlertLog(
+            alert_type="lluvia",
+            color="lluvia",
+            zonas="eta=30-60min",
+            canal="whatsapp",
+            texto=f"🌧️ {mensaje}",
+            destinatarios_count=sent_count,
+        )
+    )
+    await db.commit()  # libera el lock
+    logger.info("Alerta de lluvia inminente enviada a %d destinatarios", sent_count)
 
 
 async def send_manual_alert(mensaje: str, db: AsyncSession, alert_type: str = "manual") -> int:

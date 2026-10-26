@@ -25,6 +25,8 @@ def _fake_client(*, current: dict):
 def setup_function():
     weather._cache.clear()
     weather._forecast_cache.clear()
+    weather._ensemble_cache.clear()
+    weather._ensemble_fallo.clear()
 
 
 def test_get_weather_forecast_incluye_rafaga():
@@ -189,3 +191,68 @@ def test_get_convective_forecast_fallback_a_cache():
 
     assert out["origen"] == "cache"
     assert out["puntos"][0]["wind_gust_kmh"] == 20.0
+
+
+def _hourly_ensamble(n_horas: int = 3) -> dict:
+    return {
+        "time": [f"2026-10-26T{h:02d}:00" for h in range(n_horas)],
+        "precipitation": [0.0] * n_horas,
+        **{f"precipitation_member{k:02d}": [0.5] * n_horas for k in range(1, 31)},
+    }
+
+
+def test_get_rain_ensemble_junta_los_31_miembros():
+    factory, client = _fake_client_hourly(hourly=_hourly_ensamble())
+    with patch.object(weather.httpx, "AsyncClient", factory):
+        out = asyncio.run(weather.get_rain_ensemble(1.0, 2.0))
+
+    assert out["origen"] == "medido"
+    assert len(out["miembros"]) == 31
+    assert out["times"][0] == "2026-10-26T00:00"
+    params = client.get.call_args.kwargs["params"]
+    assert params["models"] == "gfs025" and params["hourly"] == "precipitation"
+    assert client.get.call_args.args[0].startswith("https://ensemble-api.open-meteo.com")
+
+
+def test_get_rain_ensemble_sin_cache_no_inventa_dato():
+    factory, client = _fake_client_hourly(hourly={})
+    client.get = AsyncMock(side_effect=Exception("boom"))
+    with (
+        patch.object(weather.httpx, "AsyncClient", factory),
+        patch.object(weather.asyncio, "sleep", new_callable=AsyncMock),
+    ):
+        out = asyncio.run(weather.get_rain_ensemble(9.0, 6.0))
+
+    assert out == {"times": [], "miembros": [], "origen": "sin_dato"}
+
+
+def test_get_rain_ensemble_fallback_a_cache_vencido():
+    factory, _ = _fake_client_hourly(hourly=_hourly_ensamble())
+    with patch.object(weather.httpx, "AsyncClient", factory):
+        asyncio.run(weather.get_rain_ensemble(3.33, 3.33))
+    weather._ensemble_cache[(3.33, 3.33)]["ts"] = -1e9  # vencido
+
+    factory, client = _fake_client_hourly(hourly={})
+    client.get = AsyncMock(side_effect=Exception("boom"))
+    with (
+        patch.object(weather.httpx, "AsyncClient", factory),
+        patch.object(weather.asyncio, "sleep", new_callable=AsyncMock),
+    ):
+        out = asyncio.run(weather.get_rain_ensemble(3.33, 3.33))
+
+    assert out["origen"] == "cache" and len(out["miembros"]) == 31
+
+
+def test_get_rain_ensemble_tras_una_falla_no_reintenta_dentro_del_cache_negativo():
+    factory, client = _fake_client_hourly(hourly={})
+    client.get = AsyncMock(side_effect=Exception("boom"))
+    with (
+        patch.object(weather.httpx, "AsyncClient", factory),
+        patch.object(weather.asyncio, "sleep", new_callable=AsyncMock),
+    ):
+        asyncio.run(weather.get_rain_ensemble(9.0, 6.0))
+        llamadas = client.get.await_count
+        out = asyncio.run(weather.get_rain_ensemble(9.0, 6.0))  # 2ª: dentro de los 5 min
+
+    assert llamadas == 3 and client.get.await_count == 3  # sin nuevos intentos
+    assert out["origen"] == "sin_dato"

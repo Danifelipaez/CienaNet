@@ -21,16 +21,18 @@ from app.services.dashboard_persistence import (
     _save_weather,
     _upsert_semaphore,
 )
-from app.services.ingestion.alerts_ext import get_cyclone_alerts
+from app.services.ingestion.alerts_ext import get_cyclone_alerts, get_sistemas_sinopticos
 from app.services.ingestion.ideam_hidro import get_nivel_historia, get_precipitacion_historia
 from app.services.ingestion.invemar_calidad import VARIABLES as _INVEMAR_VARIABLES
 from app.services.ingestion.invemar_calidad import get_calidad_agua
 from app.services.ingestion.satellite import get_satellite_data
 from app.services.ingestion.lightning import get_ultimo_nowcast
-from app.services.ingestion.weather import get_convective_forecast, get_weather_forecast
+from app.services.ingestion.rain_nowcast import get_ultimo_lluvia
+from app.services.ingestion.weather import get_convective_forecast, get_rain_ensemble, get_weather_forecast
 from app.services.ipp import rank_zones
 from app.services.semaphore import evaluate
 from app.services.sensor_service import aggregate_sensor_readings, get_latest_readings
+from app.services.rain_signals import lluvia_outlook
 from app.services.signals import anoxia_risk, pulso_agua_dulce, vendaval_risk
 from app.services.trends import get_trends
 
@@ -83,19 +85,38 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
                 "chlorophyll_mgm3": "medido" if db_satellite.chlorophyll_mgm3 is not None else "sin_dato",
             },
         }
-        weather_data, tasajera_weather, alerts, convective_forecast = await asyncio.gather(
+        (
+            weather_data,
+            tasajera_weather,
+            alerts,
+            convective_forecast,
+            rain_ens,
+            sinoptico,
+        ) = await asyncio.gather(
             get_weather_forecast(),
             tasajera_task,
             get_cyclone_alerts(),
             get_convective_forecast(),
+            get_rain_ensemble(),
+            get_sistemas_sinopticos(),
         )
     else:
-        weather_data, tasajera_weather, satellite_data, alerts, convective_forecast = await asyncio.gather(
+        (
+            weather_data,
+            tasajera_weather,
+            satellite_data,
+            alerts,
+            convective_forecast,
+            rain_ens,
+            sinoptico,
+        ) = await asyncio.gather(
             get_weather_forecast(),
             tasajera_task,
             get_satellite_data(),
             get_cyclone_alerts(),
             get_convective_forecast(),
+            get_rain_ensemble(),
+            get_sistemas_sinopticos(),
         )
 
     # "origen" viaja dentro de cada dict de ingesta (medido/cache/baseline/sin_dato)
@@ -172,6 +193,14 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         ),
         "vendaval": vendaval_risk(convective_forecast, settings.vendaval_gust_threshold_kmh),
         "tormenta": get_ultimo_nowcast(),
+        # Lluvia por antelación (docs/ALERTAS_LLUVIA.md): outlook 6/24h (GEFS) y
+        # sinóptico (TWD) son solo dashboard; el nowcast (RRQPE) lo calcula
+        # _nowcast_refresh cada 10 min y es el único que empuja WhatsApp.
+        "lluvia": {
+            "outlook": lluvia_outlook(rain_ens, datetime.now(UTC)),
+            "nowcast": get_ultimo_lluvia(),
+            "sinoptico": sinoptico,
+        },
     }
 
     return {

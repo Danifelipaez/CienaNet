@@ -63,6 +63,25 @@ def test_sin_ninguna_fuente_no_truena():
     assert estado["tendencias"] == _TENDENCIAS_VACIAS
 
 
+def test_senales_lluvia_sale_solo_de_memoria(monkeypatch):
+    nowcast = {"estado": "inminente"}
+    sinoptico = {"sistemas": ["onda_tropical"], "afecta_cgsm": True}
+    ensamble = {"times": [], "miembros": [], "origen": "sin_dato"}
+    monkeypatch.setattr("app.services.snapshot_service.get_ultimo_lluvia", lambda: nowcast)
+    monkeypatch.setattr("app.services.snapshot_service.get_sinoptico_cacheado", lambda: sinoptico)
+    monkeypatch.setattr("app.services.snapshot_service.get_rain_ensemble_cacheado", lambda: ensamble)
+
+    lluvia = asyncio.run(read_persisted(_make_db()))["senales"]["lluvia"]
+
+    assert lluvia["nowcast"] == nowcast and lluvia["sinoptico"] == sinoptico
+    assert lluvia["outlook"] == {"nivel": None, "estimacion": True}
+
+
+def test_senales_lluvia_sin_nada_en_cache_no_truena():
+    lluvia = asyncio.run(read_persisted(_make_db()))["senales"]["lluvia"]
+    assert lluvia["outlook"]["nivel"] is None and lluvia["nowcast"] is None and lluvia["sinoptico"] is None
+
+
 def test_tendencias_viaja_desde_get_trends(monkeypatch):
     esperado = {"variables": {"salinity_psu": {"actual": 18, "direccion": "bajando"}}, "lluvia_72h_mm": 12.0}
 

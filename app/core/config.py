@@ -92,6 +92,31 @@ class Settings(BaseSettings):
     # ~1.3 MB, suficiente para un centroide sin descargar el ciclo completo.
     glm_files_per_ciclo: int = 3
 
+    # Alerta de lluvia (docs/ALERTAS_LLUVIA.md). Caja y anillo del nowcast RRQPE,
+    # umbrales y centro salen del backtest real 27-sep..26-oct-2026 (34 episodios) —
+    # el centro del anillo es el del backtest (10.85, -74.50), no cienaga_lat/lon,
+    # para que POD/FAR medidos apliquen tal cual. Caja = zona de pesca de la CGSM.
+    lluvia_caja_lat_min: float = 10.54
+    lluvia_caja_lat_max: float = 11.01
+    lluvia_caja_lon_min: float = -74.69
+    lluvia_caja_lon_max: float = -74.32
+    lluvia_anillo_lat: float = 10.85
+    lluvia_anillo_lon: float = -74.50
+    lluvia_anillo_km_min: float = 20.0
+    lluvia_anillo_km_max: float = 60.0
+    # Fracción de píxeles de la caja con >=1 mm/h para decir "lloviendo" (5 %).
+    lluvia_caja_umbral: float = 0.05
+    # Fracción de píxeles del anillo con >=5 mm/h para "inminente" (2 %: POD 0.71,
+    # FAR por episodio 0.43; 3 % es la versión conservadora: POD 0.50, FAR 0.51).
+    lluvia_anillo_umbral: float = 0.02
+    # Scan más viejo que esto, o más NaN que lluvia_nan_max en caja+anillo -> sin_dato.
+    lluvia_scan_max_min: int = 25
+    lluvia_nan_max: float = 0.10
+    # Destellos GLM en 30 min a <=100 km para marcar "tormenta eléctrica".
+    lluvia_rayos_umbral: int = 3
+    # Histéresis del push de lluvia (maybe_send_rain_alert).
+    lluvia_dedup_min: int = 60
+
     # ERDDAP — dataset ids versionados en config, no en código:
     # pueden cambiar si NOAA/Copernicus actualizan el producto satelital.
     erddap_sst_dataset: str = "jplMURSST41"

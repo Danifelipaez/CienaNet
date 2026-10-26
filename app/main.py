@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,14 +41,22 @@ async def _nowcast_refresh() -> None:
     `anterior` vive en esta misma función (variable de closure del while, como
     ya hace este archivo) — ponytail: en memoria de proceso, un reinicio
     pierde un ciclo; el siguiente (10 min después) la repone sin intervención.
+
+    También corre el nowcast de lluvia (RRQPE, docs/ALERTAS_LLUVIA.md) con los
+    mismos destellos: `rayos` acumula el conteo a <=100 km de los últimos 30 min
+    (cada ciclo aporta ~1 min de muestra) para marcar "tormenta eléctrica".
     """
     from app.core.config import settings
-    from app.services.alert_service import maybe_send_storm_alert
+    from app.services.alert_service import maybe_send_rain_alert, maybe_send_storm_alert
     from app.services.ingestion.lightning import get_lightning_flashes, set_ultimo_nowcast
+    from app.services.ingestion.rain_nowcast import get_rain_features, set_ultimo_lluvia
+    from app.services.rain_signals import contar_rayos_cerca, lluvia_nowcast
     from app.services.signals import tormenta_aproximandose
 
     anterior: dict | None = None
+    rayos: list[tuple[datetime, int]] = []
     while True:
+        actual: dict = {"flashes": [], "cerca": [], "origen": "sin_dato"}  # si get_lightning_flashes revienta
         try:
             actual = await get_lightning_flashes()
             resultado = tormenta_aproximandose(
@@ -59,6 +68,18 @@ async def _nowcast_refresh() -> None:
             anterior = actual
         except Exception as exc:
             logger.error("Error en refresco de nowcast: %s", exc)
+        try:
+            ahora = datetime.now(UTC)
+            if actual.get("origen") == "medido":  # "cache" repetiría los destellos del ciclo previo
+                n = contar_rayos_cerca(actual["cerca"], settings.cienaga_lat, settings.cienaga_lon)
+                rayos.append((ahora, n))
+            rayos = [(t, n) for t, n in rayos if ahora - t <= timedelta(minutes=30)]
+            lluvia = lluvia_nowcast(await get_rain_features(), ahora, sum(n for _, n in rayos))
+            set_ultimo_lluvia(lluvia)
+            async with AsyncSessionLocal() as db:
+                await maybe_send_rain_alert(lluvia, db)
+        except Exception as exc:
+            logger.error("Error en nowcast de lluvia: %s", exc)
         await asyncio.sleep(600)
 
 

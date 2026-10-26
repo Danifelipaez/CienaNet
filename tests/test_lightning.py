@@ -72,6 +72,22 @@ def test_get_lightning_flashes_filtra_al_corredor():
     assert all(abs(f["lat"] - dentro[0]) < 0.01 for f in out["flashes"])
 
 
+def test_get_lightning_flashes_cerca_incluye_lo_que_el_corredor_recorta():
+    # ~70 km al norte de la CGSM: fuera del corredor (lat > 11.3) pero a <100 km.
+    norte = (settings.cienaga_lat + 0.65, settings.cienaga_lon, 1.0)
+    lejos = (settings.cienaga_lat + 1.5, settings.cienaga_lon, 2.0)  # fuera de ±1°
+    assert norte[0] > settings.corredor_lat_max
+    data = _build_glm_bytes([norte, lejos], "2026-08-29 20:00:00.000")
+    factory, _ = _fake_client(file_bytes=data)
+
+    with patch.object(lightning.httpx, "AsyncClient", factory):
+        out = asyncio.run(lightning.get_lightning_flashes())
+
+    assert out["flashes"] == []
+    assert len(out["cerca"]) == 3  # el mismo destello en cada uno de los 3 archivos
+    assert all(abs(f["lat"] - norte[0]) < 0.01 for f in out["cerca"])
+
+
 def test_get_lightning_flashes_sin_cache_no_inventa_dato():
     with (
         patch.object(lightning.httpx, "AsyncClient", _fake_client(file_bytes=None, download_falla=True)[0]),
@@ -79,7 +95,7 @@ def test_get_lightning_flashes_sin_cache_no_inventa_dato():
     ):
         out = asyncio.run(lightning.get_lightning_flashes())
 
-    assert out == {"flashes": [], "origen": "sin_dato"}
+    assert out == {"flashes": [], "cerca": [], "origen": "sin_dato"}
 
 
 def test_get_lightning_flashes_fallback_a_cache():

@@ -59,3 +59,47 @@ def test_build_ai_context_incluye_oxigeno_disuelto_e_ignora_otras_variables_inve
     texto = build_ai_context(snapshot)
     assert "Boca de la Barra 8.71 mg/L (> 8 mg/l)" in texto
     assert "Río Córdoba" not in texto
+
+
+def test_build_ai_context_menciona_lluvia_inminente_como_estimacion():
+    snapshot = {
+        **_BASE_SNAPSHOT,
+        "senales": {
+            "lluvia": {
+                "outlook": {"nivel": "alto", "prob_6h": 0.6, "prob_24h": 0.8},
+                "nowcast": {"estado": "inminente"},
+                "sinoptico": None,
+            }
+        },
+    }
+    texto = build_ai_context(snapshot)
+    assert "inminente" in texto and "NO certezas" in texto
+
+
+def test_build_ai_context_omite_lluvia_si_no_hay_senal():
+    snapshot = {
+        **_BASE_SNAPSHOT,
+        "senales": {"lluvia": {"outlook": {"nivel": "bajo"}, "nowcast": {"estado": "sin_lluvia"}}},
+    }
+    assert "Lluvia sobre la Ciénaga" not in build_ai_context(snapshot)
+    assert "Lluvia sobre la Ciénaga" not in build_ai_context(_BASE_SNAPSHOT)
+
+
+def _texto_lluvia(nowcast: dict, outlook: dict) -> str:
+    snapshot = {**_BASE_SNAPSHOT, "senales": {"lluvia": {"outlook": outlook, "nowcast": nowcast}}}
+    texto = build_ai_context(snapshot)
+    return texto[texto.index("Lluvia sobre la Ciénaga") :]
+
+
+def test_build_ai_context_lluvia_con_probabilidades_en_porcentaje():
+    texto = _texto_lluvia({"estado": "inminente"}, {"nivel": "alto", "prob_6h": 0.62, "prob_24h": 0.8})
+    assert "en 6h 62 %" in texto and "en 24h 80 %" in texto
+    assert "0.62" not in texto
+
+
+def test_build_ai_context_lluvia_no_imprime_none_ni_guion_bajo():
+    texto = _texto_lluvia({"estado": "sin_lluvia"}, {"nivel": "medio", "prob_6h": None, "prob_24h": 0.4})
+    assert "None" not in texto and "_" not in texto
+    assert "ahora sin lluvia" in texto and "en 24h 40 %" in texto and "en 6h" not in texto
+    sin_nada = _texto_lluvia({"estado": "inminente"}, {})
+    assert "None" not in sin_nada and "probabilidad" not in sin_nada
