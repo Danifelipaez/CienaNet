@@ -6,4 +6,6 @@ def test_settings_loads(monkeypatch):
     monkeypatch.setenv("SENSOR_API_KEY_SECRET", "x")
     from app.core.config import Settings
 
-    assert Settings().cienaga_lat == 10.8
+    # _env_file=None: el default es el centroide medido (docs/KNOWLEDGE_BASE.md #12); un .env
+    # local con CIENAGA_LAT propio no debe decidir si el test pasa.
+    assert Settings(_env_file=None).cienaga_lat == 10.859056
