@@ -91,6 +91,28 @@ escribe `NULL` en la columna cuando el origen es `"baseline"` — ausencia real
 en vez de un número que parece medición. El mismo patrón (`"medido" | "cache"
 | "sin_dato"`) aplica a `weather.py` para Open-Meteo.
 
+## Actualización 2026-10: SST de respaldo, reintento y tope de clorofila
+
+**Estado:** implementado. Motivo: el dashboard mostraba SST nula desde el 27-jul y clorofila
+nula desde el 7-oct (auditoría del 27-oct).
+
+- **SST con respaldo.** `coastwatch.pfeg.noaa.gov` (MUR, 1 km) dejó de responder (timeout de
+  conexión; tarda ~25 s en fallar). `get_sst()` ahora espera MUR a lo sumo `_SST_MUR_TIMEOUT` y,
+  si falla, pide `erddap_sst_fallback_dataset` (`noaacwBLENDEDsstDaily`, blended NRT global de
+  5 km en `coastwatch.noaa.gov`, variable `analysed_sst` en kelvin). Resolución mucho menor y la
+  máscara de costa deja ~40 % de píxeles válidos en el box (35 de 88 el 26-oct): sirve como
+  media del box, sin desglose por zona. **Corte de continuidad:** una SST de respaldo no es
+  comparable a una MUR de 1 km.
+- **Reintento de filas NULL.** Antes, un fallo puntual dejaba la fila del día en NULL y
+  `get_latest_snapshot` la servía el resto del día sin volver a pedir nada. Ahora una fila con
+  SST o clorofila NULL se reintenta a lo sumo una vez por hora por proceso, y
+  `_save_satellite` rellena solo los campos NULL (nunca pisa una medición ya guardada).
+- **Tope de clorofila 100 → 350 mg/m³.** El tope descartaba días legítimos: de 70 días
+  (ago-oct 2026) solo 18 tuvieron algún píxel válido (nubes), y la media del box superó 100 en
+  8 de ellos (hasta 180). Los píxeles saturan cerca de 320 mg/m³, así que 350 solo filtra
+  basura. Ojo: por encima de ~80 mg/m³ el IPP puntúa 0 y el algoritmo OLCI en agua tan turbia es
+  poco fiable — los breakpoints siguen pendientes de validar con Diego.
+
 ---
 
 ## Deuda conocida

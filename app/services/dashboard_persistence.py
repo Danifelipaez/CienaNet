@@ -52,18 +52,18 @@ async def _save_satellite(db: AsyncSession, data: dict, today: date) -> None:
 
     # limit(1): satellite_data no tiene unique en (date, source), así que un día ya
     # puede tener duplicados; la comprobación "¿existe ya?" debe tolerarlos sin
-    # reventar (mismo criterio que el read DB-first y _save_weather).
+    # reventar (mismo criterio que el read DB-first y _save_weather). El orden pone
+    # primero la fila más completa, igual que el read de dashboard_service.
     existing = (
         await db.execute(
             select(SatelliteData).where(
                 SatelliteData.date == sat_date,
                 SatelliteData.source == "nasa_mur",
+            ).order_by(
+                SatelliteData.sst_celsius.is_(None), SatelliteData.chlorophyll_mgm3.is_(None)
             ).limit(1)
         )
     ).scalar_one_or_none()
-
-    if existing:
-        return
 
     # No persistir baselines como si fueran medición: si el origen de un campo es
     # "baseline" (la API externa falló o el valor cayó fuera de rango), se guarda
@@ -77,6 +77,24 @@ async def _save_satellite(db: AsyncSession, data: dict, today: date) -> None:
         sst = None
     if origen.get("chlorophyll_mgm3") == "baseline":
         chlorophyll = None
+    por_zona = data.get("por_zona") or {}
+
+    if existing:
+        # Reintento (ver dashboard_service): rellena solo lo que seguía NULL — una
+        # medición ya guardada nunca se pisa, y un día incompleto deja de quedar
+        # en "sin dato" para siempre por un fallo puntual de la API.
+        cambio = False
+        if existing.sst_celsius is None and sst is not None:
+            existing.sst_celsius, cambio = sst, True
+        if existing.chlorophyll_mgm3 is None and chlorophyll is not None:
+            existing.chlorophyll_mgm3, cambio = chlorophyll, True
+        previo = existing.por_zona or {}
+        fusion = {z: {**por_zona.get(z, {}), **previo.get(z, {})} for z in {*previo, *por_zona}}
+        if fusion != previo:
+            existing.por_zona, cambio = fusion or None, True
+        if cambio:
+            await db.commit()
+        return
 
     db.add(
         SatelliteData(
@@ -84,7 +102,7 @@ async def _save_satellite(db: AsyncSession, data: dict, today: date) -> None:
             date=sat_date,
             sst_celsius=sst,
             chlorophyll_mgm3=chlorophyll,
-            por_zona=data.get("por_zona") or None,
+            por_zona=por_zona or None,
         )
     )
     await db.commit()

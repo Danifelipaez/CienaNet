@@ -4,6 +4,7 @@ import asyncio
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
+from app.models.environmental import SatelliteData
 from app.services.dashboard_persistence import _save_ideam_hidro, _save_invemar_calidad, _save_satellite
 
 
@@ -49,6 +50,78 @@ def test_save_satellite_no_persiste_baseline_como_medicion():
     added = db.add.call_args.args[0]
     assert added.sst_celsius is None
     assert added.chlorophyll_mgm3 == 12.0
+
+
+def _db_con_fila_existente(existing: SatelliteData) -> AsyncMock:
+    db = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = existing
+    db.execute.return_value = result
+    db.add = MagicMock()
+    return db
+
+
+def _fila(sst=None, chl=None, por_zona=None) -> SatelliteData:
+    return SatelliteData(
+        source="nasa_mur", date=date(2026, 7, 1), sst_celsius=sst, chlorophyll_mgm3=chl, por_zona=por_zona
+    )
+
+
+_MEDIDO = {"sst_celsius": "medido", "chlorophyll_mgm3": "medido"}
+
+
+def test_save_satellite_reintento_rellena_solo_los_campos_nulos():
+    """Un día guardado con NULL por una falla puntual de la API se completa en el
+    reintento, sin crear una fila duplicada."""
+    existing = _fila(sst=None, chl=12.0)
+    db = _db_con_fila_existente(existing)
+    data = {"sst_celsius": 29.9, "chlorophyll_mgm3": 99.0, "date": "2026-07-01", "origen": _MEDIDO}
+
+    asyncio.run(_save_satellite(db, data, date(2026, 7, 1)))
+
+    assert existing.sst_celsius == 29.9
+    assert existing.chlorophyll_mgm3 == 12.0  # la medición ya guardada no se pisa
+    db.add.assert_not_called()
+    db.commit.assert_awaited_once()
+
+
+def test_save_satellite_reintento_con_baseline_o_sin_cambios_no_toca_nada():
+    existing = _fila(sst=None, chl=None)
+    db = _db_con_fila_existente(existing)
+    data = {
+        "sst_celsius": 28.0,
+        "chlorophyll_mgm3": 4.5,
+        "date": "2026-07-01",
+        "origen": {"sst_celsius": "baseline", "chlorophyll_mgm3": "baseline"},
+    }
+
+    asyncio.run(_save_satellite(db, data, date(2026, 7, 1)))
+
+    assert existing.sst_celsius is None and existing.chlorophyll_mgm3 is None
+    db.commit.assert_not_awaited()
+
+
+def test_save_satellite_reintento_fusiona_por_zona_sin_pisar_lo_medido():
+    existing = _fila(sst=29.0, chl=None, por_zona={"Nueva Venecia": {"sst_celsius": 29.1}})
+    db = _db_con_fila_existente(existing)
+    data = {
+        "sst_celsius": 30.0,
+        "chlorophyll_mgm3": 50.0,
+        "date": "2026-07-01",
+        "origen": _MEDIDO,
+        "por_zona": {
+            "Nueva Venecia": {"sst_celsius": 99.9, "chlorophyll_mgm3": 48.0},
+            "Buenavista": {"chlorophyll_mgm3": 52.0},
+        },
+    }
+
+    asyncio.run(_save_satellite(db, data, date(2026, 7, 1)))
+
+    assert existing.por_zona == {
+        "Nueva Venecia": {"sst_celsius": 29.1, "chlorophyll_mgm3": 48.0},
+        "Buenavista": {"chlorophyll_mgm3": 52.0},
+    }
+    assert existing.sst_celsius == 29.0 and existing.chlorophyll_mgm3 == 50.0
 
 
 def test_save_ideam_hidro_no_ejecuta_nada_si_no_hay_filas():

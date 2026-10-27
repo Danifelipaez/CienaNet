@@ -1,15 +1,62 @@
 """Tests de ingesta satelital: procedencia medido/baseline y desglose por zona. Sin red."""
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.ingestion import satellite
 
 
-def test_get_sst_baseline_si_falla():
-    with patch.object(satellite, "_fetch_sst", side_effect=Exception("boom")):
+def test_get_sst_baseline_si_fallan_mur_y_respaldo():
+    with (
+        patch.object(satellite, "_fetch_sst", side_effect=Exception("boom")),
+        patch.object(satellite, "_fetch_sst_blended", new_callable=AsyncMock, side_effect=Exception("boom")),
+    ):
         result = asyncio.run(satellite.get_sst())
     assert result == {"box": satellite._SST_BASELINE, "origen": "baseline", "por_zona": {}}
+
+
+def test_get_sst_cae_al_blended_si_mur_falla():
+    respaldo = {"box": 29.9, "origen": "medido", "por_zona": {}}
+    with (
+        patch.object(satellite, "_fetch_sst", side_effect=Exception("pfeg caído")),
+        patch.object(satellite, "_fetch_sst_blended", new_callable=AsyncMock, return_value=respaldo),
+    ):
+        result = asyncio.run(satellite.get_sst())
+    assert result == respaldo
+
+
+def test_get_sst_cae_al_blended_si_mur_excede_el_timeout():
+    respaldo = {"box": 29.9, "origen": "medido", "por_zona": {}}
+    with (
+        patch.object(satellite, "_fetch_sst", side_effect=lambda _: time.sleep(0.3)),
+        patch.object(satellite, "_SST_MUR_TIMEOUT", 0.05),
+        patch.object(satellite, "_fetch_sst_blended", new_callable=AsyncMock, return_value=respaldo),
+    ):
+        result = asyncio.run(satellite.get_sst())
+    assert result == respaldo
+
+
+_SST_COLS = ["time", "latitude", "longitude", "analysed_sst"]
+
+
+def test_fetch_sst_blended_promedia_validos_y_pasa_a_celsius():
+    rows = [["t", 10.6, -74.5, 303.0], ["t", 10.7, -74.5, None], ["t", 10.8, -74.5, 304.0]]
+    body = {"table": {"columnNames": _SST_COLS, "rows": rows}}
+    with patch.object(satellite.httpx, "AsyncClient", _fake_client(json_body=body)):
+        result = asyncio.run(satellite._fetch_sst_blended())
+    assert result == {"box": 30.35, "origen": "medido", "por_zona": {}}  # (303+304)/2 K = 30.35 °C
+
+
+def test_fetch_sst_blended_rechaza_sin_validos_o_fuera_de_rango():
+    for rows in ([["t", 10.6, -74.5, None]], [["t", 10.6, -74.5, 200.0]]):
+        body = {"table": {"columnNames": _SST_COLS, "rows": rows}}
+        with patch.object(satellite.httpx, "AsyncClient", _fake_client(json_body=body)):
+            try:
+                asyncio.run(satellite._fetch_sst_blended())
+            except ValueError:
+                continue
+        raise AssertionError(f"debió rechazar {rows}")
 
 
 def test_get_sst_medido_si_ok():
@@ -51,6 +98,23 @@ def test_get_chlorophyll_medido_con_pixeles_validos():
         result = asyncio.run(satellite.get_chlorophyll())
     assert result["box"] == 12.5
     assert result["origen"] == "medido"
+
+
+def test_get_chlorophyll_acepta_hipereutrofia_real_sobre_100():
+    # Medido 2026-10-25: media del box 155 mg/m³ — el tope anterior (100) la descartaba.
+    body = {"table": {"columnNames": _COLS, "rows": [["t", 10.9, -74.5, 150.0], ["t", 10.8, -74.5, 160.0]]}}
+    with patch.object(satellite.httpx, "AsyncClient", _fake_client(json_body=body)):
+        result = asyncio.run(satellite.get_chlorophyll())
+    assert result["box"] == 155.0
+    assert result["origen"] == "medido"
+
+
+def test_get_chlorophyll_descarta_valor_absurdo_sobre_el_techo():
+    body = {"table": {"columnNames": _COLS, "rows": [["t", 10.9, -74.5, satellite._CHL_MAX + 1]]}}
+    with patch.object(satellite.httpx, "AsyncClient", _fake_client(json_body=body)):
+        result = asyncio.run(satellite.get_chlorophyll())
+    assert result["box"] == satellite._CHL_BASELINE
+    assert result["origen"] == "baseline"
 
 
 def test_mean_near_promedia_solo_el_vecindario():
