@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     # Sector "FG" (Sentinel-3 OLCI, ~278m/diario) cubre la CGSM — ver docs/RESOLUCION_FUENTES.md.
     # Cambia si NOAA reorganiza los sectores (216 en total, uno por bloque geográfico).
     erddap_chl_dataset: str = "noaacwS3AOLCIchlaSectorFGDaily"
+    # Respaldo de SST cuando jplMURSST41 (coastwatch.pfeg.noaa.gov) no responde: blended
+    # NRT global de 5 km en coastwatch.noaa.gov, misma variable `analysed_sst` en kelvin.
+    erddap_sst_fallback_dataset: str = "noaacwBLENDEDsstDaily"
 
     @model_validator(mode="after")
     def _reject_default_admin_key_outside_dev(self) -> "Settings":

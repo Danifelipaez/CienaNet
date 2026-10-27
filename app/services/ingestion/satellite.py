@@ -1,6 +1,7 @@
 """Ingesta satelital ERDDAP — SST (NASA MUR) y clorofila (Copernicus S-3 OLCI vía NOAA CoastWatch).
 
 SST: lag 2 días, resolución ~1.1 km (jplMURSST41) — ya es la más fina disponible, sin cambios.
+Si ese servidor (coastwatch.pfeg.noaa.gov) no responde, cae al blended de 5 km de CoastWatch central.
 Clorofila: Sentinel-3 OLCI, ~278 m diario, sector "FG" (cubre la CGSM). Migrado desde el
 compuesto MODIS de 4 km/8 días: ese píxel mezclaba la laguna con el Caribe abierto y
 subestimaba la clorofila real (hipereutrófica) de la ciénaga. Ver docs/RESOLUCION_FUENTES.md.
@@ -39,8 +40,15 @@ LAT_MIN, LAT_MAX = 10.54, 11.01
 LON_MIN, LON_MAX = -74.69, -74.32
 
 _SST_BASELINE = 28.0   # °C promedio histórico Ciénaga Grande
-_CHL_BASELINE = 4.5    # mg/m³ promedio histórico (bajo — el dato real de OLCI ronda 8-80)
+_CHL_BASELINE = 4.5    # mg/m³ promedio histórico (bajo — el dato real de OLCI ronda 8-160)
+# Techo solo contra basura, no un juicio de hipereutrofia: medido 2026-08..10 (18 días con píxel
+# válido) la media del box llegó a 155 mg/m³ y los píxeles saturan cerca de 320 — con el tope
+# anterior (100) se descartaban días legítimos y la clorofila quedaba NULL semanas enteras.
+_CHL_MAX = 350.0
 _SST_MIN, _SST_MAX = 15.0, 40.0  # rango válido antes de aceptar (buenas prácticas del doc)
+_SST_MUR_TIMEOUT = 12.0  # s — pfeg caído tarda ~25 s en fallar solo; sin tope cada ciclo lo paga entero
+# ponytail: sin circuit breaker — con MUR caído cada día nuevo paga _SST_MUR_TIMEOUT una vez;
+# agregarlo si la caída se vuelve crónica y ese costo molesta.
 _CHL_WINDOW_DAYS = 7   # ventana para tolerar nubes: producto óptico, no todos los días tienen píxel válido
 _CHL_STRIDE = 5        # ~1.4 km (era 10/~2.8km). Con el box apretado el conteo de píxeles
                        # cae ~4x; stride 5 mantiene decenas de píxeles por zona tras el
@@ -125,7 +133,7 @@ async def _fetch_chlorophyll(start_str: str) -> dict:
         return {"box": _CHL_BASELINE, "origen": "baseline", "por_zona": {}}
 
     box_chl = sum(valid) / len(valid)
-    if 0 < box_chl < 100:
+    if 0 < box_chl < _CHL_MAX:
         box_value, box_origen = round(box_chl, 3), "medido"
     else:
         box_value, box_origen = _CHL_BASELINE, "baseline"
@@ -133,21 +141,51 @@ async def _fetch_chlorophyll(start_str: str) -> dict:
     por_zona = {}
     for zona in ZONES:
         v = _mean_near(rows, cols, zona["lat"], zona["lng"], _ZONE_RADIUS_DEG)
-        if v is not None and 0 < v < 100:
+        if v is not None and 0 < v < _CHL_MAX:
             por_zona[zona["name"]] = round(v, 3)
 
     return {"box": box_value, "origen": box_origen, "por_zona": por_zona}
 
 
+async def _fetch_sst_blended() -> dict:
+    """Respaldo de SST: blended NRT 5 km (NOAA CoastWatch central). Resolución mucho
+    menor que MUR y la máscara de costa deja ~40 % de píxeles válidos en el box, así
+    que sirve como media del box; ponytail: sin desglose por zona (cae al box en
+    _zone_satellite), agregarlo si se vuelve la fuente habitual."""
+    # "(last)": mismo motivo que la clorofila — el NRT se atrasa un día variable.
+    query = f"analysed_sst[(last)][({LAT_MIN}):({LAT_MAX})][({LON_MIN}):({LON_MAX})]"
+    url = f"{NOAA_CW_SERVER}/griddap/{settings.erddap_sst_fallback_dataset}.json?{query}"
+    async with httpx.AsyncClient(timeout=30, headers={"User-Agent": _USER_AGENT}) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
+
+    cols = data["table"]["columnNames"]
+    idx = cols.index("analysed_sst")
+    valid = [row[idx] for row in data["table"]["rows"] if row[idx] is not None]
+    if not valid:
+        raise ValueError("sin píxeles válidos en el box")
+    box_sst = round(sum(valid) / len(valid) - 273.15, 2)  # Kelvin → Celsius
+    if not _SST_MIN <= box_sst <= _SST_MAX:
+        raise ValueError(f"fuera de rango: {box_sst}°C")
+    return {"box": box_sst, "origen": "medido", "por_zona": {}}
+
+
 async def get_sst() -> dict:
     """Retorna {"box", "origen", "por_zona"} — origen es "medido" o "baseline"
     (API caída o valor fuera de rango). El baseline nunca se persiste como si
-    fuera medición real, ver dashboard_persistence._save_satellite."""
+    fuera medición real, ver dashboard_persistence._save_satellite.
+
+    MUR (1 km) primero; si falla o excede _SST_MUR_TIMEOUT, el blended de respaldo."""
     date_str = (date.today() - timedelta(days=2)).isoformat()
     try:
-        return await asyncio.to_thread(_fetch_sst, date_str)
+        return await asyncio.wait_for(asyncio.to_thread(_fetch_sst, date_str), _SST_MUR_TIMEOUT)
     except Exception as exc:
-        logger.warning("NASA ERDDAP SST no disponible (%s): usando baseline %s°C", exc, _SST_BASELINE)
+        logger.warning("NASA ERDDAP SST (MUR) no disponible (%r): probando %s", exc, settings.erddap_sst_fallback_dataset)
+    try:
+        return await _fetch_sst_blended()
+    except Exception as exc:
+        logger.warning("SST de respaldo no disponible (%r): usando baseline %s°C", exc, _SST_BASELINE)
         return {"box": _SST_BASELINE, "origen": "baseline", "por_zona": {}}
 
 

@@ -7,6 +7,7 @@ el límite de 300 líneas de docs/GUARDRAILS.md mezclando las cuatro cosas.
 
 import asyncio
 import logging
+import time
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
@@ -42,6 +43,35 @@ logger = logging.getLogger(__name__)
 # solape cubren el rezago propio de la fuente (~2 días) sin recorrer meses.
 _IDEAM_BACKFILL_DAYS = 7
 
+# ponytail: estado en memoria de proceso — en serverless cada instancia fría reintenta
+# una vez; basta para no martillar ERDDAP en cada GET /data/latest.
+_SAT_REINTENTO_S = 3600.0
+_sat_ultimo_reintento: float | None = None
+
+
+def _toca_reintento_satelite(row: SatelliteData | None) -> bool:
+    """Fila del día con algún campo NULL = la API falló ese día (una nube o un 5xx puntual
+    no debe dejarlo en "sin dato" para siempre). Reintenta a lo sumo una vez por
+    _SAT_REINTENTO_S por proceso."""
+    global _sat_ultimo_reintento
+    if row is None or (row.sst_celsius is not None and row.chlorophyll_mgm3 is not None):
+        return False
+    ahora = time.monotonic()
+    if _sat_ultimo_reintento is not None and ahora - _sat_ultimo_reintento < _SAT_REINTENTO_S:
+        return False
+    _sat_ultimo_reintento = ahora
+    return True
+
+
+def _sin_baseline(satellite: dict) -> dict:
+    """Campos con origen "baseline" -> None/"sin_dato", como los serviría la fila de DB."""
+    origen = dict(satellite.get("origen") or {})
+    out = dict(satellite)
+    for campo, valor in origen.items():
+        if valor == "baseline":
+            out[campo], origen[campo] = None, "sin_dato"
+    return {**out, "origen": origen}
+
 
 async def get_latest_snapshot(db: AsyncSession) -> dict:
     """Obtiene datos de todas las fuentes y retorna el snapshot actual.
@@ -65,9 +95,16 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
             select(SatelliteData).where(
                 SatelliteData.date == sat_date,
                 SatelliteData.source == "nasa_mur",
+            ).order_by(
+                # Con duplicados del mismo día, la fila más completa va primero.
+                SatelliteData.sst_celsius.is_(None), SatelliteData.chlorophyll_mgm3.is_(None)
             ).limit(1)
         )
     ).scalar_one_or_none()
+
+    reintento = _toca_reintento_satelite(db_satellite)
+    if reintento:
+        db_satellite = None  # cae a la rama de red; _save_satellite solo rellena lo que faltaba
 
     tasajera_task = get_weather_forecast(settings.tasajera_lat, settings.tasajera_lon)
 
@@ -118,6 +155,11 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
             get_rain_ensemble(),
             get_sistemas_sinopticos(),
         )
+
+    if reintento:
+        # Un reintento fallido no debe mostrar el baseline donde la fila de DB decía
+        # "sin dato" (la respuesta alternaría entre ambos cada hora).
+        satellite_data = _sin_baseline(satellite_data)
 
     # "origen" viaja dentro de cada dict de ingesta (medido/cache/baseline/sin_dato)
     # hasta acá. Se extrae a un bloque aparte para el snapshot; en particular debe
