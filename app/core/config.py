@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Supabase API
     supabase_url: str
-    supabase_service_role_key: str
+    supabase_service_role_key: str = ""  # sin uso en el código; opcional para que Vercel no reviente sin ella
 
     # Meta WhatsApp Cloud API (opcionales hasta integrar el webhook)
     whatsapp_token: str = ""
