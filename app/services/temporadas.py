@@ -43,6 +43,8 @@ def efecto_enso(enso: dict | None, seca: bool) -> str | None:
     if not enso or enso["fase"] == "neutral":
         return None
     fen = "El Niño" if enso["fase"] == "el_nino" else "La Niña"
+    if enso.get("terminando"):  # "Final ... Advisory": el evento se está acabando, no llegando
+        return f"{fen} se está terminando: las lluvias deberían volver poco a poco a lo normal."
     if not enso["vigente"]:
         return f"Podría llegar {fen} en los próximos meses."
     if enso["fase"] == "el_nino":

@@ -190,8 +190,12 @@ def parse_enso(raw_html: str) -> dict:
     bajo = estado.lower()
     fase = "el_nino" if "el niño" in bajo else "la_nina" if "la niña" in bajo else "neutral"
     # Watch = se espera que llegue; Advisory = ya está; "Final ... Advisory" = terminando.
-    vigente = "advisory" in bajo and "final" not in bajo
-    return {"estado": estado, "fase": fase, "vigente": vigente, "sinopsis": m.group(2).strip()[:300]}
+    terminando = "final" in bajo
+    vigente = "advisory" in bajo and not terminando
+    return {
+        "estado": estado, "fase": fase, "vigente": vigente, "terminando": terminando,
+        "sinopsis": m.group(2).strip()[:300],
+    }
 
 
 async def get_estado_enso() -> tuple[dict | None, str]:

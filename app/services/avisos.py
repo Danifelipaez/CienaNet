@@ -194,7 +194,10 @@ def evaluar_avisos(
     for a in vigentes:
         unicos.setdefault((a["tipo"], a["clave"]), a)
     vigentes = list(unicos.values())
-    return {"vigentes": vigentes, "temporada": t, "sin_revisar": sin_revisar, "actualizado": ahora.isoformat()}
+    return {
+        "vigentes": vigentes, "temporada": t, "sin_revisar": sin_revisar, "horas": settings.aviso_horas,
+        "actualizado": ahora.isoformat(),
+    }
 
 
 # ponytail: último resultado en memoria de proceso, igual que el nowcast de lluvia;

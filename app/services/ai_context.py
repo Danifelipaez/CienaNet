@@ -136,7 +136,7 @@ def build_ai_context(snapshot: dict, vendaval: dict | None = None) -> str:
         t = avisos.get("temporada") or {}
         faltan = ", ".join(_SIN_REVISAR.get(x, x) for x in avisos.get("sin_revisar") or [])
         parts.append(
-            f"Avisos del tiempo (próximas 36 h; consenso de modelos ECMWF/GFS/ICON, NOAA NHC, NOAA CPC): "
+            f"Avisos del tiempo (próximas {avisos.get('horas', 36)} h; consenso de modelos ECMWF/GFS/ICON, NOAA NHC, NOAA CPC): "
             f"{vigentes or 'ninguno'}."
             + (f" No se pudo revisar: {faltan}." if faltan else "")
             + (f" Temporada: {t['actual']}; próxima {t['proxima']} desde {t['proxima_cuando']}. "

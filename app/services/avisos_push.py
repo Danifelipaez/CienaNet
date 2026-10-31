@@ -34,12 +34,32 @@ _DEDUP = timedelta(days=4)
 _DEDUP_TEMPORADA = timedelta(days=60)
 _GUARDA = timedelta(hours=12)
 _TIPOS_DIARIOS = ("viento_fuerte", "lluvia_fuerte", "oleaje", "ideam_mar", "ideam_cuenca")
+# ponytail: pescadores a los que les falló el envío de un aviso ya registrado (wa_id ->
+# texto). Se reintenta una vez por ciclo; en memoria de proceso, un reinicio los pierde.
+_reintentos: dict[str, str] = {}
+
+
+async def _reintentar_fallidos(db: AsyncSession) -> None:
+    if not _reintentos:
+        return
+    # Quien se dio de baja entre ciclos ya no recibe el reintento.
+    activos = set(
+        (
+            await db.execute(
+                select(User.wa_id).where(User.wa_id.in_(list(_reintentos)), User.alertas_activas.is_(True))
+            )
+        ).scalars().all()
+    )
+    for wa_id, texto in list(_reintentos.items()):
+        if wa_id not in activos or await whatsapp_service.send_template_message(wa_id, _TEMPLATE, params=[texto]):
+            del _reintentos[wa_id]
 
 
 async def maybe_send_avisos(avisos: dict | None, db: AsyncSession) -> int:
     """Empuja los avisos `push` que no se hayan enviado ya. Devuelve cuántos avisos
     nuevos salieron. Si TODOS los envíos fallan no se registra nada: el próximo
     refresco horario lo reintenta mientras el aviso siga vigente."""
+    await _reintentar_fallidos(db)
     pendientes = [a for a in (avisos or {}).get("vigentes", []) if a.get("push")]
     if not pendientes:
         return 0  # ni siquiera vale la pena el advisory lock
@@ -68,9 +88,12 @@ async def maybe_send_avisos(avisos: dict | None, db: AsyncSession) -> int:
     texto = " ".join(a["mensaje"] for a in nuevos)
     recipients = (await db.execute(select(User).where(User.alertas_activas.is_(True)))).scalars().all()
     sent_count = 0
+    fallidos = []
     for user in recipients:
         if await whatsapp_service.send_template_message(user.wa_id, _TEMPLATE, params=[texto]):
             sent_count += 1
+        else:
+            fallidos.append(user.wa_id)
 
     if recipients and sent_count == 0:
         await db.commit()  # libera el lock sin registrar: se reintenta el próximo ciclo
@@ -80,6 +103,10 @@ async def maybe_send_avisos(avisos: dict | None, db: AsyncSession) -> int:
             len(recipients),
         )
         return 0
+    # Envío parcial: el aviso queda registrado (los que sí lo recibieron no deben recibirlo
+    # dos veces) y a los que fallaron se les reintenta en los próximos ciclos.
+    for wa_id in fallidos:
+        _reintentos[wa_id] = f"{_reintentos[wa_id]} {texto}" if wa_id in _reintentos else texto
 
     for a in nuevos:
         db.add(ExternalAlert(source=a["fuente"][:50], alert_type=a["tipo"], title=a["titulo"], description=a["mensaje"]))

@@ -4,6 +4,7 @@ pescador aunque haya varios avisos, y reintento si todos los envíos fallan."""
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.services import avisos_push
 from app.services.avisos_push import maybe_send_avisos
 
 
@@ -81,3 +82,33 @@ def test_si_todos_los_envios_fallan_no_registra_y_reintenta():
         assert asyncio.run(maybe_send_avisos({"vigentes": [_aviso()]}, db)) == 0
     db.add.assert_not_called()
     db.commit.assert_awaited_once()
+
+
+def test_envio_parcial_registra_y_reintenta_solo_a_los_fallidos():
+    avisos_push._reintentos.clear()
+    ok, falla = MagicMock(wa_id="+571"), MagicMock(wa_id="+572")
+    db = _db([None], [ok, falla])
+    with patch(
+        "app.services.whatsapp_service.send_template_message", new_callable=AsyncMock, side_effect=[True, None]
+    ):
+        assert asyncio.run(maybe_send_avisos({"vigentes": [_aviso()]}, db)) == 1
+    assert avisos_push._reintentos == {"+572": "msg viento_fuerte"}
+
+    # Próximo ciclo sin avisos nuevos: reintenta al que falló (sigue suscrito) y lo saca.
+    db2 = AsyncMock()
+    db2.execute = AsyncMock(return_value=_result(scalars_all=["+572"]))
+    with _send() as send:
+        asyncio.run(maybe_send_avisos({"vigentes": []}, db2))
+    assert send.await_args.args[0] == "+572"
+    assert avisos_push._reintentos == {}
+
+
+def test_reintento_no_llega_a_quien_se_dio_de_baja():
+    avisos_push._reintentos.clear()
+    avisos_push._reintentos["+573"] = "x"
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=_result(scalars_all=[]))
+    with _send() as send:
+        asyncio.run(maybe_send_avisos(None, db))
+    send.assert_not_awaited()
+    assert avisos_push._reintentos == {}

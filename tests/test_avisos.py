@@ -171,7 +171,7 @@ def test_parse_enso():
         "El Ni&ntilde;o continues to strengthen. More text here."
     )
     e = parse_enso(raw)
-    assert e == {"estado": "El Niño Advisory", "fase": "el_nino", "vigente": True,
+    assert e == {"estado": "El Niño Advisory", "fase": "el_nino", "vigente": True, "terminando": False,
                  "sinopsis": "El Niño continues to strengthen."}
     assert parse_enso(raw.replace("Advisory", "Watch").replace("El Ni&ntilde;o Watch", "La Ni&ntilde;a Watch"))[
         "fase"] == "la_nina"
@@ -269,3 +269,11 @@ def test_ideam_solo_sigue_enlaces_cap_del_propio_host():
         assert asyncio.run(ideam_cap.get_alertas_ideam()) == ([], "medido")
     assert get.await_count == 1  # solo el índice; el enlace externo no se pidió
     avisos_ext._cache.pop("ideam_cap", None)
+
+
+def test_enso_final_advisory_es_terminando_no_llegando():
+    raw = "ENSO Alert System Status: Final El Ni&ntilde;o Advisory Synopsis: ENSO-neutral is favored. More."
+    e = parse_enso(raw)
+    assert e["terminando"] and not e["vigente"]
+    t = temporada(date(2027, 4, 1), e)
+    assert "terminando" in t["efecto_enso"] and "Podría llegar" not in t["efecto_enso"]
