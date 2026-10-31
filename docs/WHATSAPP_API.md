@@ -177,6 +177,8 @@ Meta solo permite enviar mensajes `text` o `interactive` dentro de las **24 hora
 - `alerta_temperatura` — cuando temperatura supera X
 - `alerta_condicion` — cambio de color del semáforo (`app/services/alert_service.py::maybe_send_alert`)
 - `alerta_tormenta` — tormenta detectada acercándose por nowcast de rayos (`maybe_send_storm_alert`, ver `docs/ALERTAS_VENDAVAL.md`)
+- `alerta_lluvia` — lluvia fuerte inminente por nowcast satelital (`maybe_send_rain_alert`, ver `docs/ALERTAS_LLUVIA.md`)
+- `aviso_clima` — avisos del tiempo: viento, lluvia, oleaje, frente frío, ciclón, alerta IDEAM y temporada (`avisos_push.maybe_send_avisos`, ver `docs/AVISOS_CLIMA.md`). Un parámetro de cuerpo, sin saltos de línea
 - `bienvenida` — cuando un nuevo pescador escribe por primera vez
 
 ---

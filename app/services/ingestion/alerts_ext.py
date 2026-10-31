@@ -69,7 +69,8 @@ async def get_cyclone_alerts() -> list[dict]:
         return _cache["data"] if _cache["data"] is not None else []
 
 
-TWD_URL = "https://tgftp.nws.noaa.gov/data/raw/ax/axnt20.knhc.twdat.txt"
+# El nombre viejo (axnt20.knhc.twdat.txt) da 301 -> 404 desde oct-2026.
+TWD_URL = "https://tgftp.nws.noaa.gov/data/raw/ax/axnt20.knhc.twd.at.txt"
 TWD_URL_HTML = "https://www.nhc.noaa.gov/text/MIATWDAT.shtml"
 _TWD_TTL = 3600.0  # el TWD sale cada 6 h (00/06/12/18 UTC)
 _twd_cache: dict = {"data": None, "ts": 0.0, "fallo_ts": None}
@@ -152,6 +153,7 @@ def parse_twd(texto: str, ahora: datetime | None = None) -> dict:
         logger.warning("TWD sin secciones del Caribe reconocibles — ¿cambió el formato?")
 
     tipos: list[str] = []
+    afectan: list[str] = []  # qué sistemas en concreto afectan (afecta_cgsm no dice cuál)
     afecta, extracto = False, None
     for nombre, cuerpo in secciones.items():
         oraciones = [" ".join(o.split()) for o in _ORACION_RE.split(cuerpo.strip()) if o.strip()]
@@ -173,6 +175,8 @@ def parse_twd(texto: str, ahora: datetime | None = None) -> dict:
                 cerca = bool(_AFECTA_RE.search(oracion)) or any(73.5 <= x <= 75.5 for x in lons)
                 if exige_conveccion:
                     cerca = cerca and bool(_CONVECCION_RE.search(contexto))
+                if cerca and tipo not in afectan:
+                    afectan.append(tipo)
                 if cerca and not afecta:
                     afecta, extracto = True, oracion[:300]  # primera oración que afecta gana
                 elif extracto is None and not afecta:
@@ -180,6 +184,7 @@ def parse_twd(texto: str, ahora: datetime | None = None) -> dict:
     return {
         "sistemas": tipos,
         "afecta_cgsm": afecta,
+        "afectan": afectan,
         "extracto": extracto,
         "emitido": _emitido_twd(texto, ahora),
     }
