@@ -65,10 +65,10 @@ def avisos_ideam(alertas: list[dict], ahora: datetime) -> list[dict]:
             continue  # cache viejo: la alerta ya venció
         inicio = datetime.fromisoformat(a["inicio"]) if a.get("inicio") else ahora
         severo = a["severidad"] == "Extreme" or (a["severidad"] == "Severe" and a["tipo"] == "ideam_mar")
-        color = _COLOR_IDEAM.get(a["severidad"], "")
+        color = f" {_COLOR_IDEAM[a['severidad']]}" if a["severidad"] in _COLOR_IDEAM else ""
         out.append(aviso(
             a["tipo"], "alto" if severo else "medio", f"IDEAM: {a['evento']}",
-            f"⚠️ Alerta {color} del IDEAM ({a['evento'].lower()}) para {a['zona']}"
+            f"⚠️ Alerta{color} del IDEAM ({a['evento'].lower()}) para {a['zona']}"
             f"{' ' + hasta(expira, ahora) if expira else ''}. {_CONSEJO_IDEAM[a['tipo']]}",
             "IDEAM (alerta oficial CAP)",
             # Un aviso por evento y día: el IDEAM reemite la misma alerta con otro id en cada boletín.

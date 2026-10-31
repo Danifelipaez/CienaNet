@@ -277,3 +277,8 @@ def test_enso_final_advisory_es_terminando_no_llegando():
     assert e["terminando"] and not e["vigente"]
     t = temporada(date(2027, 4, 1), e)
     assert "terminando" in t["efecto_enso"] and "Podría llegar" not in t["efecto_enso"]
+
+
+def test_ideam_severidad_desconocida_no_rompe_el_mensaje():
+    r = evaluar_avisos(AHORA, ideam=[_cap("ideam_mar", "Unknown")])
+    assert "⚠️ Alerta del IDEAM (tiempo lluvioso)" in r["vigentes"][0]["mensaje"]
