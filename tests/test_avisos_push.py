@@ -2,6 +2,7 @@
 pescador aunque haya varios avisos, y reintento si todos los envíos fallan."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services import avisos_push
@@ -92,7 +93,7 @@ def test_envio_parcial_registra_y_reintenta_solo_a_los_fallidos():
         "app.services.whatsapp_service.send_template_message", new_callable=AsyncMock, side_effect=[True, None]
     ):
         assert asyncio.run(maybe_send_avisos({"vigentes": [_aviso()]}, db)) == 1
-    assert avisos_push._reintentos == {"+572": "msg viento_fuerte"}
+    assert [x for _, x in avisos_push._reintentos["+572"]] == ["msg viento_fuerte"]
 
     # Próximo ciclo sin avisos nuevos: reintenta al que falló (sigue suscrito) y lo saca.
     db2 = AsyncMock()
@@ -105,10 +106,25 @@ def test_envio_parcial_registra_y_reintenta_solo_a_los_fallidos():
 
 def test_reintento_no_llega_a_quien_se_dio_de_baja():
     avisos_push._reintentos.clear()
-    avisos_push._reintentos["+573"] = "x"
+    avisos_push._reintentos["+573"] = [(datetime.now(UTC), "x")]
     db = AsyncMock()
     db.execute = AsyncMock(return_value=_result(scalars_all=[]))
     with _send() as send:
         asyncio.run(maybe_send_avisos(None, db))
     send.assert_not_awaited()
     assert avisos_push._reintentos == {}
+
+
+def test_reintento_viejo_se_descarta_y_texto_largo_se_acota():
+    avisos_push._reintentos.clear()
+    avisos_push._reintentos["+574"] = [(datetime.now(UTC) - timedelta(hours=7), "viento ayer")]
+    db = AsyncMock()
+    with _send() as send:
+        asyncio.run(maybe_send_avisos(None, db))
+    send.assert_not_awaited()  # un aviso de hace 7 h ya no se manda
+    db.execute.assert_not_called()
+    assert avisos_push._reintentos == {}
+
+    largo = avisos_push._acotar("x" * 2000)
+    assert len(largo) <= 900 and largo.endswith("Escribe *avisos* para ver el resto.")
+    assert avisos_push._acotar("corto") == "corto"

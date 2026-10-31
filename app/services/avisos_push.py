@@ -35,11 +35,26 @@ _DEDUP_TEMPORADA = timedelta(days=60)
 _GUARDA = timedelta(hours=12)
 _TIPOS_DIARIOS = ("viento_fuerte", "lluvia_fuerte", "oleaje", "ideam_mar", "ideam_cuenca")
 # ponytail: pescadores a los que les falló el envío de un aviso ya registrado (wa_id ->
-# texto). Se reintenta una vez por ciclo; en memoria de proceso, un reinicio los pierde.
-_reintentos: dict[str, str] = {}
+# [(cuándo falló, texto)]). Se reintenta una vez por ciclo hasta _REINTENTO_MAX: después
+# el aviso ya es viejo ("viento hoy en la madrugada" leído al día siguiente engaña).
+# En memoria de proceso, un reinicio los pierde.
+_reintentos: dict[str, list[tuple[datetime, str]]] = {}
+_REINTENTO_MAX = timedelta(hours=6)
+# Meta limita el cuerpo del template a 1024 caracteres (texto fijo + parámetro).
+_MAX_TEXTO = 900
+_CORTE = " … Escribe *avisos* para ver el resto."
+
+
+def _acotar(texto: str) -> str:
+    return texto if len(texto) <= _MAX_TEXTO else texto[: _MAX_TEXTO - len(_CORTE)].rstrip() + _CORTE
 
 
 async def _reintentar_fallidos(db: AsyncSession) -> None:
+    limite = datetime.now(UTC) - _REINTENTO_MAX
+    for wa_id in list(_reintentos):
+        _reintentos[wa_id] = [(t, x) for t, x in _reintentos[wa_id] if t >= limite]
+        if not _reintentos[wa_id]:
+            del _reintentos[wa_id]
     if not _reintentos:
         return
     # Quien se dio de baja entre ciclos ya no recibe el reintento.
@@ -50,7 +65,8 @@ async def _reintentar_fallidos(db: AsyncSession) -> None:
             )
         ).scalars().all()
     )
-    for wa_id, texto in list(_reintentos.items()):
+    for wa_id, pendientes in list(_reintentos.items()):
+        texto = _acotar(" ".join(x for _, x in pendientes))
         if wa_id not in activos or await whatsapp_service.send_template_message(wa_id, _TEMPLATE, params=[texto]):
             del _reintentos[wa_id]
 
@@ -85,7 +101,7 @@ async def maybe_send_avisos(avisos: dict | None, db: AsyncSession) -> int:
         return 0
 
     # Espacio, no salto de línea: Meta rechaza parámetros de template con saltos de línea.
-    texto = " ".join(a["mensaje"] for a in nuevos)
+    texto = _acotar(" ".join(a["mensaje"] for a in nuevos))
     recipients = (await db.execute(select(User).where(User.alertas_activas.is_(True)))).scalars().all()
     sent_count = 0
     fallidos = []
@@ -106,7 +122,7 @@ async def maybe_send_avisos(avisos: dict | None, db: AsyncSession) -> int:
     # Envío parcial: el aviso queda registrado (los que sí lo recibieron no deben recibirlo
     # dos veces) y a los que fallaron se les reintenta en los próximos ciclos.
     for wa_id in fallidos:
-        _reintentos[wa_id] = f"{_reintentos[wa_id]} {texto}" if wa_id in _reintentos else texto
+        _reintentos.setdefault(wa_id, []).append((ahora, texto))
 
     for a in nuevos:
         db.add(ExternalAlert(source=a["fuente"][:50], alert_type=a["tipo"], title=a["titulo"], description=a["mensaje"]))
