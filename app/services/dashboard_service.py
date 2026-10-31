@@ -74,11 +74,11 @@ def _sin_baseline(satellite: dict) -> dict:
     return {**out, "origen": origen}
 
 
-async def _avisos_o_none(sinoptico: dict | None) -> dict | None:
+async def _avisos_o_none() -> dict | None:
     # Cada fuente ya degrada sola a "sin_dato"; esto solo ataja un bug para que no
     # tumbe el snapshot entero — y lo deja en el log como error, no en silencio.
     try:
-        return await calcular_avisos(sinoptico)
+        return await calcular_avisos()
     except Exception:
         logger.exception("Falló el cálculo de avisos del tiempo")
         return None
@@ -99,6 +99,8 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
     # Cada get_calidad_agua ya cachea 6h de su lado (ver ingestion/invemar_calidad.py)
     # — este gather solo paga la red la primera vez que vence el caché, no cada refresh.
     invemar_task = asyncio.gather(*(get_calidad_agua(v) for v in _INVEMAR_VARIABLES))
+    # Red independiente del resto: corre en paralelo en vez de sumarse al final.
+    avisos_task = asyncio.ensure_future(_avisos_o_none())
 
     sat_date = date.today() - timedelta(days=2)
     db_satellite = (
@@ -256,7 +258,7 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
         },
         # Avisos del tiempo por consenso (docs/AVISOS_CLIMA.md) — los empuja
         # _hourly_refresh vía avisos_push.maybe_send_avisos, no esta función.
-        "avisos": await _avisos_o_none(sinoptico),
+        "avisos": await avisos_task,
     }
 
     return {

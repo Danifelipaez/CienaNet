@@ -28,6 +28,7 @@ from app.services.avisos_oficiales import (
     temporada_y_aviso,
 )
 from app.services.ingestion import avisos_ext, ideam_cap
+from app.services.ingestion.alerts_ext import get_sistemas_sinopticos
 
 Serie = dict[str, list]
 
@@ -189,8 +190,10 @@ def evaluar_avisos(
     vigentes.sort(key=lambda a: (a["nivel"] != "alto", datetime.fromisoformat(a["desde"]) if a["desde"] else sin_hora))
     # Misma (tipo, clave) = mismo aviso (p.ej. dos CAP del IDEAM del mismo evento y día para
     # cuencas distintas): uno solo, el de mayor nivel, o se enviaría dos veces el mismo texto.
-    vistos: set[tuple[str, str]] = set()
-    vigentes = [a for a in vigentes if (a["tipo"], a["clave"]) not in vistos and not vistos.add((a["tipo"], a["clave"]))]
+    unicos: dict[tuple[str, str], dict] = {}
+    for a in vigentes:
+        unicos.setdefault((a["tipo"], a["clave"]), a)
+    vigentes = list(unicos.values())
     return {"vigentes": vigentes, "temporada": t, "sin_revisar": sin_revisar, "actualizado": ahora.isoformat()}
 
 
@@ -204,15 +207,19 @@ def get_avisos_cacheados() -> dict | None:
     return _ultimo
 
 
-async def calcular_avisos(sinoptico: dict | None) -> dict:
-    """Baja las fuentes en paralelo y evalúa. Xweather solo si hay empate (ver arriba)."""
+async def calcular_avisos() -> dict:
+    """Baja las fuentes en paralelo y evalúa. Xweather solo si hay empate (ver arriba).
+    El TWD sale de alerts_ext (cache de 1 h compartido con el snapshot)."""
     global _ultimo
-    (modelos, o_mod), (oleaje, o_ola), (ciclones, o_cic), (enso, o_enso), (ideam, o_ideam) = await asyncio.gather(
-        avisos_ext.get_pronostico_modelos(),
-        avisos_ext.get_oleaje_modelos(),
-        avisos_ext.get_ciclones_activos(),
-        avisos_ext.get_estado_enso(),
-        ideam_cap.get_alertas_ideam(),
+    (modelos, o_mod), (oleaje, o_ola), (ciclones, o_cic), (enso, o_enso), (ideam, o_ideam), sinoptico = (
+        await asyncio.gather(
+            avisos_ext.get_pronostico_modelos(),
+            avisos_ext.get_oleaje_modelos(),
+            avisos_ext.get_ciclones_activos(),
+            avisos_ext.get_estado_enso(),
+            ideam_cap.get_alertas_ideam(),
+            get_sistemas_sinopticos(),
+        )
     )
     ahora = datetime.now(UTC)
     xweather, o_xw = None, "no_consultado"

@@ -19,6 +19,8 @@ from app.services.ingestion.avisos_ext import _con_cache, _get
 logger = logging.getLogger(__name__)
 
 FEED_URL = "https://alertascap.ideam.gov.co/ospa/xml"
+# Solo se siguen enlaces CAP de este host: el índice es contenido externo.
+_CAP_PREFIJO = "https://alertascap.ideam.gov.co/"
 _CAP_NS = {"cap": "urn:oasis:names:tc:emergency:cap:1.2"}
 
 # (texto en el título del índice, en minúsculas -> (tipo, nombre para el pescador))
@@ -71,7 +73,7 @@ async def get_alertas_ideam() -> tuple[list[dict] | None, str]:
         for e in feed.entries:
             zona = zona_de(f"{e.get('title', '')} {e.get('summary', '')}")
             href = next((lk.get("href") for lk in e.get("links", []) if lk.get("type") == "application/cap+xml"), None)
-            if zona is not None and href:
+            if zona is not None and href and href.startswith(_CAP_PREFIJO):
                 candidatas.append((zona, href))
 
         async def detalle(href: str) -> dict:

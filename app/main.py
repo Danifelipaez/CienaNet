@@ -27,10 +27,18 @@ async def _hourly_refresh() -> None:
             async with AsyncSessionLocal() as db:
                 snapshot = await get_latest_snapshot(db)
                 await maybe_send_alert(snapshot["semaphore"], db)
-                await maybe_send_avisos(snapshot["senales"].get("avisos"), db)
             logger.info("Snapshot ambiental actualizado")
         except Exception as exc:
             logger.error("Error en refresco horario: %s", exc)
+            snapshot = None
+        # Aparte del semáforo: si ese envío revienta (DB, migración), los avisos del tiempo
+        # igual salen. Sesión nueva, la anterior pudo quedar en una transacción rota.
+        try:
+            if snapshot is not None:
+                async with AsyncSessionLocal() as db:
+                    await maybe_send_avisos(snapshot["senales"].get("avisos"), db)
+        except Exception as exc:
+            logger.error("Error enviando avisos del tiempo: %s", exc)
         await asyncio.sleep(3600)
 
 

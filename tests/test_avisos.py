@@ -250,3 +250,22 @@ def test_xweather_cuota_guard_y_reinicio():
         settings.xweather_client_id, settings.xweather_client_secret = viejo[0], viejo[1]
         avisos_ext.xweather_cuota.clear()
         avisos_ext.xweather_cuota.update(viejo[2])
+
+
+def test_ideam_solo_sigue_enlaces_cap_del_propio_host():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.services.ingestion import avisos_ext, ideam_cap
+
+    feed = """<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">
+      <title>Current Watches, Warnings and Advisories Issued by Ideam</title>
+      <entry><id>1</id><title>Severe weather warning for Caribbean central issued x</title>
+        <link rel="related" type="application/cap+xml" href="http://169.254.169.254/latest"/></entry>
+    </feed>"""
+    avisos_ext._cache.pop("ideam_cap", None)
+    get = AsyncMock(return_value=MagicMock(text=feed))
+    with patch.object(ideam_cap, "_get", new=get):
+        assert asyncio.run(ideam_cap.get_alertas_ideam()) == ([], "medido")
+    assert get.await_count == 1  # solo el índice; el enlace externo no se pidió
+    avisos_ext._cache.pop("ideam_cap", None)
