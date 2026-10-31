@@ -95,9 +95,12 @@ caliente (ciénaga más baja y salada); La Niña → más lluviosa. Oct-2026: El
 - Medición del 31-oct-2026 08:24 UTC: quedaban 8.515 de 15.000, reinicio 23-nov-2026
   00:00 UTC (≈22,6 días). Peor caso del backend hasta el reinicio: 8 × 22,6 ≈ 181 tokens.
   El radar por diseño gasta como mucho 144/día (≈3.260 hasta el reinicio): 181 + 3.260 <
-  8.515, alcanza. Pero el consumo medido del periodo (~6.485 en ~8,4 días ≈ 780/día) está
-  muy por encima de ese diseño; si sigue así la cuota se acaba antes del reinicio con o sin
-  los avisos. Revisar el cacheo del proxy de radar.
+  8.515, alcanza. Segunda medición a las 08:49 UTC: 8.514 (solo la llamada de prueba), o
+  sea que hoy no hay consumo continuo; los ~6.485 tokens ya gastados del periodo fueron un
+  pico (≈780/día de promedio desde el 23-oct, probablemente desarrollo). Con 8.514 para
+  22,6 días hay ≈377/día disponibles contra ≤152/día de radar + avisos: **alcanza hasta el
+  reinicio con margen**. Si el promedio vuelve a ~780/día no alcanzaría (se acabaría hacia el
+  11-nov) con o sin los avisos: revisar entonces el cacheo del proxy de radar.
 - `/alerts` de Xweather no cubre Colombia, `/stormcells` es solo EE. UU. y `/lightning`
   cuesta 10×: por eso no se usan.
 
