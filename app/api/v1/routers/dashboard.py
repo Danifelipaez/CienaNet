@@ -26,7 +26,7 @@ from app.schemas.dashboard import (
     AskRequest,
     AskResponse,
 )
-from app.services.ai_context import ALERTA_IDEAM_ONDA_TROPICAL, build_ai_context, camaron_moonrise_hint
+from app.services.ai_context import build_ai_context, camaron_moonrise_hint
 from app.services.ai_service import get_ai_provider
 from app.services.dashboard_service import get_latest_snapshot
 from app.services.points_service import get_points
@@ -150,12 +150,6 @@ async def ask_ai(
         "Tasajera?'), nunca una pregunta dirigida al usuario ofreciéndole opciones "
         "(nunca 'Deseas consultar...' ni 'Quieres saber...') — se reenvía tal cual "
         "como su siguiente mensaje si la elige."
-        f"\nAlerta oficial IDEAM vigente: {ALERTA_IDEAM_ONDA_TROPICAL}. Al saludar o "
-        "cuando te pregunten por el estado actual de la ciénaga o las condiciones de "
-        "los próximos días, nómbrala en una frase corta (que existe una alerta IDEAM "
-        "vigente y hasta cuándo) SIN listar sus detalles (lluvias, vientos, "
-        "recomendación); da el detalle completo solo si te preguntan específicamente "
-        "por la alerta. El resto de las respuestas no la necesita en absoluto."
     )
     if body.contexto:
         system += (

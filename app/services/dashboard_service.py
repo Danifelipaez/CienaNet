@@ -22,6 +22,7 @@ from app.services.dashboard_persistence import (
     _save_weather,
     _upsert_semaphore,
 )
+from app.services.avisos import calcular_avisos
 from app.services.ingestion.alerts_ext import get_cyclone_alerts, get_sistemas_sinopticos
 from app.services.ingestion.ideam_hidro import get_nivel_historia, get_precipitacion_historia
 from app.services.ingestion.invemar_calidad import VARIABLES as _INVEMAR_VARIABLES
@@ -71,6 +72,16 @@ def _sin_baseline(satellite: dict) -> dict:
         if valor == "baseline":
             out[campo], origen[campo] = None, "sin_dato"
     return {**out, "origen": origen}
+
+
+async def _avisos_o_none(sinoptico: dict | None) -> dict | None:
+    # Cada fuente ya degrada sola a "sin_dato"; esto solo ataja un bug para que no
+    # tumbe el snapshot entero — y lo deja en el log como error, no en silencio.
+    try:
+        return await calcular_avisos(sinoptico)
+    except Exception:
+        logger.exception("Falló el cálculo de avisos del tiempo")
+        return None
 
 
 async def get_latest_snapshot(db: AsyncSession) -> dict:
@@ -243,6 +254,9 @@ async def get_latest_snapshot(db: AsyncSession) -> dict:
             "nowcast": get_ultimo_lluvia(),
             "sinoptico": sinoptico,
         },
+        # Avisos del tiempo por consenso (docs/AVISOS_CLIMA.md) — los empuja
+        # _hourly_refresh vía avisos_push.maybe_send_avisos, no esta función.
+        "avisos": await _avisos_o_none(sinoptico),
     }
 
     return {

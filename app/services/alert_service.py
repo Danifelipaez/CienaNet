@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.models.environmental import DailySemaphore, ExternalAlert
 from app.models.messaging import AlertLog, User
 from app.services import whatsapp_service
+from app.services.avisos import get_avisos_cacheados
 from app.services.ingestion.alerts_ext import get_cyclone_alerts
 from app.services.ingestion.lightning import get_ultimo_nowcast
 
@@ -291,4 +292,5 @@ async def get_alert_status(db: AsyncSession) -> dict:
         "semaphore_color": semaphore.color if semaphore else None,
         "tormenta_nowcast": nowcast,
         "origen_tormenta_nowcast": "medido" if nowcast is not None else "sin_dato",
+        "avisos_tiempo": get_avisos_cacheados(),  # docs/AVISOS_CLIMA.md; None = aún no calculado
     }

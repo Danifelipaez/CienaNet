@@ -117,6 +117,29 @@ class Settings(BaseSettings):
     # Histéresis del push de lluvia (maybe_send_rain_alert).
     lluvia_dedup_min: int = 60
 
+    # Avisos del tiempo por consenso de modelos (docs/AVISOS_CLIMA.md, app/services/avisos.py).
+    # Viento/ráfaga = mismos umbrales del semáforo rojo (semaphore.py) para que el aviso
+    # anticipe el rojo. Lluvia y ola calibradas con 2 años de pronósticos archivados
+    # (2024-2025, tabla en el doc): viento ~4-5 días/año (feb-mar), lluvia ~11 días/año
+    # (abr-jun y ago-nov), ola ~20 días/año (ene-abr y jul). 20 mm/6 h y 2 m de ola
+    # no disparaban casi nunca: los modelos globales suavizan el aguacero puntual.
+    aviso_horas: int = 36  # ventana hacia adelante que se revisa en cada refresco horario
+    aviso_consenso: int = 2  # modelos independientes que deben verlo para empujar WhatsApp
+    aviso_viento_kmh: float = 30.0
+    aviso_rafaga_kmh: float = 45.0
+    aviso_lluvia_mm_6h: float = 10.0
+    aviso_ola_m: float = 1.5
+    aviso_ciclon_km: float = 1000.0  # ciclón más cerca que esto empuja; hasta el doble, solo dashboard
+    # Punto de mar frente a la Boca de la Barra para el oleaje (Open-Meteo Marine lo
+    # ajusta a la celda de mar más cercana, ~11.04, -74.37).
+    mar_lat: float = 11.05
+    mar_lon: float = -74.45
+    # Xweather: solo desempate del consenso (avisos.py). Vacío = no se consulta nunca.
+    xweather_client_id: str = ""
+    xweather_client_secret: str = ""
+    # Tokens del periodo que se dejan para el radar del frontend (misma cuenta).
+    xweather_reserva_tokens: int = 1000
+
     # ERDDAP — dataset ids versionados en config, no en código:
     # pueden cambiar si NOAA/Copernicus actualizan el producto satelital.
     erddap_sst_dataset: str = "jplMURSST41"

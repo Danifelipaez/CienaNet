@@ -2,16 +2,42 @@
 
 from datetime import UTC, datetime
 
-# ponytail: alerta puntual hardcodeada (no hay ingesta de alertas IDEAM todavía).
-# Vence después del 18-sep-2026 — borrar esta constante y sus usos en dashboard.py
-# / message_router.py cuando la onda tropical pase, o subir a una fuente en vivo
-# si esto se vuelve recurrente. Fuente: IDEAM, vía prensa (diariolalibertad.com,
-# eltiempo.com), 16-sep-2026.
-ALERTA_IDEAM_ONDA_TROPICAL = (
-    "onda tropical sobre el Caribe colombiano (14 al 18 de septiembre de 2026), "
-    "con lluvias fuertes, tormentas eléctricas y vientos, más intensa el jueves 17 "
-    "y viernes 18 — precaución cerca de ríos y caños por crecientes súbitas"
-)
+_SIN_REVISAR = {
+    "viento": "viento",
+    "lluvia": "lluvia",
+    "oleaje": "oleaje",
+    "ciclon": "ciclones",
+    "frente_frio": "frentes fríos",
+    "enso": "El Niño/La Niña",
+    "ideam": "alertas del IDEAM",
+}
+
+
+def avisos_para_pescador(avisos: dict | None, solo_alertas: bool = False) -> str | None:
+    """Avisos del tiempo (app/services/avisos.py) como texto de WhatsApp. Completo para
+    la palabra *avisos*; `solo_alertas` (saludo, condición) devuelve None si no hay
+    ningún aviso alto, para no alargar esas respuestas."""
+    if avisos is None:
+        return None if solo_alertas else "Todavía no tengo los avisos del tiempo. Intenta en un rato."
+    altos = [a["mensaje"] for a in avisos.get("vigentes") or [] if a.get("nivel") == "alto"]
+    if solo_alertas:
+        return " ".join(altos) or None
+    faltan = [_SIN_REVISAR.get(x, x) for x in avisos.get("sin_revisar") or []]
+    medios = [a["titulo"] for a in avisos.get("vigentes") or [] if a.get("nivel") == "medio"]
+    lineas = list(altos)
+    if medios:
+        lineas.append(f"🟡 Estar atento: {'; '.join(medios)}.")
+    if not lineas:
+        lineas.append("✅ Sin avisos del tiempo para las próximas horas" + (" en lo que pude revisar." if faltan else "."))
+    if faltan:
+        lineas.append(f"⚠️ No pude revisar: {', '.join(faltan)} (fuente sin datos). Pregunta a la Capitanía.")
+    t = avisos.get("temporada")
+    if t:
+        lineas.append(
+            f"📅 Ahora estamos en la {t['actual']}; la {t['proxima']} empieza a {t['proxima_cuando']}. "
+            f"{t.get('efecto_enso') or ''}".strip()
+        )
+    return "\n\n".join(lineas)
 
 
 def build_ai_context(snapshot: dict, vendaval: dict | None = None) -> str:
@@ -98,6 +124,24 @@ def build_ai_context(snapshot: dict, vendaval: dict | None = None) -> str:
             f"Lluvia sobre la Ciénaga (estimaciones, NO certezas): ahora {(estado or 'sin dato').replace('_', ' ')} "
             "(satélite, 10-60 min; 'inminente' = lluvia fuerte llegando en ~30-60 min)"
             f"{modelo}. Menciónalo si preguntan por lluvia o salir a pescar."
+        )
+
+    avisos = (snapshot.get("senales") or {}).get("avisos")
+    if avisos:
+        vigentes = "; ".join(
+            f"{a['titulo']} ({'confirmado' if a['nivel'] == 'alto' else 'posible, un solo modelo'}, {a['fuente']}): "
+            f"{a['mensaje']}"
+            for a in avisos.get("vigentes") or []
+        )
+        t = avisos.get("temporada") or {}
+        faltan = ", ".join(_SIN_REVISAR.get(x, x) for x in avisos.get("sin_revisar") or [])
+        parts.append(
+            f"Avisos del tiempo (próximas 36 h; consenso de modelos ECMWF/GFS/ICON, NOAA NHC, NOAA CPC): "
+            f"{vigentes or 'ninguno'}."
+            + (f" No se pudo revisar: {faltan}." if faltan else "")
+            + (f" Temporada: {t['actual']}; próxima {t['proxima']} desde {t['proxima_cuando']}. "
+               f"{t.get('efecto_enso') or ''}" if t else "")
+            + " Menciónalos si preguntan por el tiempo, el pronóstico o si es seguro salir a pescar."
         )
 
     return " ".join(parts)

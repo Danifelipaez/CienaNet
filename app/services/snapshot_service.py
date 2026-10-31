@@ -21,6 +21,7 @@ from app.models.environmental import (
     SatelliteData,
     WeatherSnapshot,
 )
+from app.services.avisos import get_avisos_cacheados
 from app.services.ingestion.alerts_ext import get_sinoptico_cacheado
 from app.services.ingestion.rain_nowcast import get_ultimo_lluvia
 from app.services.ingestion.weather import get_rain_ensemble_cacheado
@@ -183,6 +184,7 @@ async def read_persisted(db: AsyncSession) -> dict:
                 "nowcast": get_ultimo_lluvia(),
                 "sinoptico": get_sinoptico_cacheado(),
             },
+            "avisos": get_avisos_cacheados(),
         },
         "edad_horas": {
             "weather": _horas_desde(weather_row.timestamp) if weather_row else None,

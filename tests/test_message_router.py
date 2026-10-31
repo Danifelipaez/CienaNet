@@ -152,3 +152,40 @@ def test_reporte_con_cantidad_guarda_indice():
         )
     reporte = next(c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], CatchReport))
     assert reporte.cantidad_indice == 15.0
+
+
+def _avisos_alto():
+    return {
+        "vigentes": [{"tipo": "viento_fuerte", "nivel": "alto", "titulo": "Viento fuerte",
+                      "mensaje": "💨 Viento fuerte mañana en la madrugada."}],
+        "sin_revisar": [],
+        "temporada": {"actual": "segunda temporada de lluvias", "proxima": "temporada seca",
+                      "proxima_cuando": "mediados de diciembre", "efecto_enso": None},
+    }
+
+
+def test_palabra_avisos_responde_los_avisos_vigentes():
+    db = _make_db()
+    with (
+        patch("app.services.message_router.get_avisos_cacheados", return_value=_avisos_alto()),
+        patch(
+            "app.services.message_router.whatsapp_service.send_text_message", new_callable=AsyncMock, return_value=None
+        ) as mock_send,
+    ):
+        asyncio.run(handle_incoming_text("+570000000", "Ana", "avisos", "wamid.in", db))
+    reply = mock_send.call_args.args[1]
+    assert "💨 Viento fuerte" in reply and "temporada seca" in reply
+
+
+def test_saludo_agrega_solo_avisos_confirmados():
+    db = _make_db()
+    with (
+        patch("app.services.message_router.get_avisos_cacheados", return_value=_avisos_alto()),
+        patch(
+            "app.services.message_router.whatsapp_service.send_text_message", new_callable=AsyncMock, return_value=None
+        ) as mock_send,
+    ):
+        asyncio.run(handle_incoming_text("+570000000", "Ana", "hola", "wamid.in", db))
+    reply = mock_send.call_args.args[1]
+    assert "CienaRed" in reply and "💨 Viento fuerte" in reply
+    assert "Alerta IDEAM" not in reply  # la alerta fija de sep-2026 ya no se muestra

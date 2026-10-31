@@ -40,7 +40,7 @@ esa probabilidad en los bloques +6..+12, +12..+18 y +18..+24 h. `nivel`: <0.3 ba
 fin, así que el bloque toma las etiquetas en (t0, t0+6h].
 
 ### Sinóptico (TWD)
-Texto crudo `tgftp.nws.noaa.gov/.../axnt20.knhc.twdat.txt` (fallback `MIATWDAT.shtml`),
+Texto crudo `tgftp.nws.noaa.gov/.../axnt20.knhc.twd.at.txt` (fallback `MIATWDAT.shtml`),
 cache 1 h. Se leen las secciones CARIBBEAN SEA, TROPICAL WAVES y MONSOON TROUGH, por
 oración. Detecta `frente_frio`, `onda_tropical` (eje 70-80W o Colombia), `vaguada` y
 `baja_presion`. `afecta_cgsm` exige que la misma oración ubique el sistema en Colombia /

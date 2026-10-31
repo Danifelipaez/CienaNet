@@ -69,7 +69,8 @@ async def get_cyclone_alerts() -> list[dict]:
         return _cache["data"] if _cache["data"] is not None else []
 
 
-TWD_URL = "https://tgftp.nws.noaa.gov/data/raw/ax/axnt20.knhc.twdat.txt"
+# El nombre viejo (axnt20.knhc.twdat.txt) da 301 -> 404 desde oct-2026.
+TWD_URL = "https://tgftp.nws.noaa.gov/data/raw/ax/axnt20.knhc.twd.at.txt"
 TWD_URL_HTML = "https://www.nhc.noaa.gov/text/MIATWDAT.shtml"
 _TWD_TTL = 3600.0  # el TWD sale cada 6 h (00/06/12/18 UTC)
 _twd_cache: dict = {"data": None, "ts": 0.0, "fallo_ts": None}
