@@ -184,7 +184,13 @@ def evaluar_avisos(
     if enso is None:
         sin_revisar.append("enso")
 
-    vigentes.sort(key=lambda a: (a["nivel"] != "alto", a["desde"] or ""))
+    # Altos primero, luego por hora real (los `desde` traen offsets distintos: -05:00 IDEAM, +00:00 modelos).
+    sin_hora = datetime.max.replace(tzinfo=UTC)
+    vigentes.sort(key=lambda a: (a["nivel"] != "alto", datetime.fromisoformat(a["desde"]) if a["desde"] else sin_hora))
+    # Misma (tipo, clave) = mismo aviso (p.ej. dos CAP del IDEAM del mismo evento y día para
+    # cuencas distintas): uno solo, el de mayor nivel, o se enviaría dos veces el mismo texto.
+    vistos: set[tuple[str, str]] = set()
+    vigentes = [a for a in vigentes if (a["tipo"], a["clave"]) not in vistos and not vistos.add((a["tipo"], a["clave"]))]
     return {"vigentes": vigentes, "temporada": t, "sin_revisar": sin_revisar, "actualizado": ahora.isoformat()}
 
 

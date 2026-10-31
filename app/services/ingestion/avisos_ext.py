@@ -21,6 +21,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime, parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -207,7 +208,27 @@ async def get_estado_enso() -> tuple[dict | None, str]:
 xweather_cuota: dict = {"restante": None, "limite": None, "reinicia": None}
 
 
+def _leer_cuota(h: httpx.Headers, agotada: bool = False) -> None:
+    if h.get("x-ratelimit-remaining-period", "").isdigit():
+        xweather_cuota.update(
+            restante=int(h["x-ratelimit-remaining-period"]),
+            limite=int(h["x-ratelimit-limit-period"]) if h.get("x-ratelimit-limit-period", "").isdigit() else None,
+            reinicia=h.get("x-ratelimit-reset-period"),
+        )
+    elif agotada:
+        # Sin headers no se sabe cuándo reinicia: volver a probar en 6 h.
+        xweather_cuota.update(
+            restante=0, reinicia=format_datetime(datetime.now(timezone.utc) + timedelta(hours=6), usegmt=True)
+        )
+
+
 def xweather_configurado() -> bool:
+    reinicia = xweather_cuota["reinicia"]
+    try:
+        if reinicia and parsedate_to_datetime(reinicia) <= datetime.now(timezone.utc):
+            xweather_cuota.update(restante=None, reinicia=None)  # periodo nuevo: la cuota se repuso
+    except (TypeError, ValueError):
+        pass  # header raro: el guard sigue con el último restante conocido
     restante = xweather_cuota["restante"]
     con_cuota = restante is None or restante >= settings.xweather_reserva_tokens
     return bool(settings.xweather_client_id and settings.xweather_client_secret) and con_cuota
@@ -221,24 +242,23 @@ async def get_xweather_pronostico() -> tuple[dict | None, str]:
         return None, "sin_dato"
 
     async def fetch() -> dict:
-        resp = await _get(
-            _XWEATHER_URL.format(lat=settings.cienaga_lat, lon=settings.cienaga_lon),
-            {
-                "filter": "1hr",
-                "limit": 48,
-                "fields": "periods.dateTimeISO,periods.precipMM,periods.windSpeedKPH,"
-                "periods.windGustKPH,periods.windDirDEG",
-                "client_id": settings.xweather_client_id,
-                "client_secret": settings.xweather_client_secret,
-            },
-        )
-        h = resp.headers
-        if h.get("x-ratelimit-remaining-period", "").isdigit():
-            xweather_cuota.update(
-                restante=int(h["x-ratelimit-remaining-period"]),
-                limite=int(h["x-ratelimit-limit-period"]) if h.get("x-ratelimit-limit-period", "").isdigit() else None,
-                reinicia=h.get("x-ratelimit-reset-period"),
+        try:
+            resp = await _get(
+                _XWEATHER_URL.format(lat=settings.cienaga_lat, lon=settings.cienaga_lon),
+                {
+                    "filter": "1hr",
+                    "limit": 48,
+                    "fields": "periods.dateTimeISO,periods.precipMM,periods.windSpeedKPH,"
+                    "periods.windGustKPH,periods.windDirDEG",
+                    "client_id": settings.xweather_client_id,
+                    "client_secret": settings.xweather_client_secret,
+                },
             )
+        except httpx.HTTPStatusError as exc:
+            # Cuota agotada (429): marcarla para que xweather_configurado() deje de llamar.
+            _leer_cuota(exc.response.headers, agotada=exc.response.status_code == 429)
+            raise
+        _leer_cuota(resp.headers)
         body = resp.json()
         if not body.get("success"):
             raise ValueError(f"Xweather respondió error: {(body.get('error') or {}).get('code')}")

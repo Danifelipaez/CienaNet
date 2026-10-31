@@ -153,6 +153,7 @@ def parse_twd(texto: str, ahora: datetime | None = None) -> dict:
         logger.warning("TWD sin secciones del Caribe reconocibles — ¿cambió el formato?")
 
     tipos: list[str] = []
+    afectan: list[str] = []  # qué sistemas en concreto afectan (afecta_cgsm no dice cuál)
     afecta, extracto = False, None
     for nombre, cuerpo in secciones.items():
         oraciones = [" ".join(o.split()) for o in _ORACION_RE.split(cuerpo.strip()) if o.strip()]
@@ -174,6 +175,8 @@ def parse_twd(texto: str, ahora: datetime | None = None) -> dict:
                 cerca = bool(_AFECTA_RE.search(oracion)) or any(73.5 <= x <= 75.5 for x in lons)
                 if exige_conveccion:
                     cerca = cerca and bool(_CONVECCION_RE.search(contexto))
+                if cerca and tipo not in afectan:
+                    afectan.append(tipo)
                 if cerca and not afecta:
                     afecta, extracto = True, oracion[:300]  # primera oración que afecta gana
                 elif extracto is None and not afecta:
@@ -181,6 +184,7 @@ def parse_twd(texto: str, ahora: datetime | None = None) -> dict:
     return {
         "sistemas": tipos,
         "afecta_cgsm": afecta,
+        "afectan": afectan,
         "extracto": extracto,
         "emitido": _emitido_twd(texto, ahora),
     }

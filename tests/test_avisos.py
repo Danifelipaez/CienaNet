@@ -116,17 +116,21 @@ def test_ciclon_por_distancia():
     assert "Huracán Kappa" in ciclones[0]["mensaje"]
 
 
-def test_frente_frio_solo_empuja_si_afecta():
+def test_frente_frio_solo_empuja_si_el_frente_afecta():
     r = evaluar_avisos(AHORA, sinoptico={"sistemas": ["frente_frio"], "afecta_cgsm": False}, ideam=[], ciclones=[])
     assert _tipos(r)["frente_frio"]["nivel"] == "medio"
-    r = evaluar_avisos(AHORA, sinoptico={"sistemas": ["frente_frio"], "afecta_cgsm": True}, ideam=[], ciclones=[])
+    # Una onda tropical cerca pone afecta_cgsm=True, pero el frente sigue lejos: no empuja.
+    lejos = {"sistemas": ["frente_frio", "onda_tropical"], "afecta_cgsm": True, "afectan": ["onda_tropical"]}
+    assert _tipos(evaluar_avisos(AHORA, sinoptico=lejos, ideam=[], ciclones=[]))["frente_frio"]["nivel"] == "medio"
+    cerca = {"sistemas": ["frente_frio"], "afecta_cgsm": True, "afectan": ["frente_frio"]}
+    r = evaluar_avisos(AHORA, sinoptico=cerca, ideam=[], ciclones=[])
     a = _tipos(r)["frente_frio"]
     assert a["nivel"] == "alto" and a["clave"] == "2026-W45"
 
 
-def _cap(tipo: str, severidad: str, expira: str = "2026-11-03T11:00:00-05:00") -> dict:
+def _cap(tipo: str, severidad: str, expira: str = "2026-11-03T11:00:00-05:00", evento: str = "Tiempo lluvioso") -> dict:
     return {
-        "id": "x", "evento": "Tiempo lluvioso", "severidad": severidad, "tipo": tipo, "zona": "la zona",
+        "id": "x", "evento": evento, "severidad": severidad, "tipo": tipo, "zona": "la zona",
         "inicio": "2026-11-02T06:00:00-05:00", "expira": expira,
     }
 
@@ -134,9 +138,9 @@ def _cap(tipo: str, severidad: str, expira: str = "2026-11-03T11:00:00-05:00") -
 def test_ideam_severidad_por_zona():
     r = evaluar_avisos(AHORA, ideam=[
         _cap("ideam_mar", "Severe"),
-        _cap("ideam_cuenca", "Severe"),
+        _cap("ideam_cuenca", "Severe", evento="Creciente"),
         _cap("ideam_cuenca", "Extreme"),
-        _cap("ideam_mar", "Moderate"),
+        _cap("ideam_mar", "Moderate", evento="Pleamar"),
         _cap("ideam_mar", "Extreme", expira="2026-11-02T06:00:00-05:00"),  # ya vencida
     ])
     ideam = [(a["tipo"], a["nivel"]) for a in r["vigentes"] if a["tipo"].startswith("ideam")]
@@ -198,3 +202,51 @@ def test_texto_para_pescador():
     assert "Viento fuerte" in completo and "📅 Ahora estamos en la" in completo
     assert avisos_para_pescador(evaluar_avisos(AHORA, **TODO_OK), solo_alertas=True) is None
     assert avisos_para_pescador(None, solo_alertas=True) is None
+
+
+def test_mismo_tipo_y_clave_sale_una_vez_y_orden_cronologico():
+    dos_cuencas = [
+        {**_cap("ideam_cuenca", "Extreme"), "evento": "Creciente", "zona": "el río Aracataca"},
+        {**_cap("ideam_cuenca", "Extreme"), "evento": "Creciente", "zona": "la Ciénaga Grande"},
+    ]
+    r = evaluar_avisos(AHORA, ideam=dos_cuencas)
+    assert [a["tipo"] for a in r["vigentes"]].count("ideam_cuenca") == 1
+    # Viento desde 20:00Z; IDEAM desde 16:00-05:00 = 21:00Z, que como texto ordenaría antes.
+    viento = _serie(viento=[35.0 if h >= 8 else 5.0 for h in range(72)])
+    ideam = {**_cap("ideam_mar", "Severe"), "inicio": "2026-11-02T16:00:00-05:00"}
+    r = evaluar_avisos(AHORA, modelos={"a": viento, "b": viento}, ideam=[ideam])
+    assert [a["tipo"] for a in r["vigentes"]][:2] == ["viento_fuerte", "ideam_mar"]
+
+
+def test_ideam_feed_que_no_es_atom_es_falla_no_lista_vacia():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.services.ingestion import avisos_ext, ideam_cap
+
+    avisos_ext._cache.pop("ideam_cap", None)
+    html = MagicMock(text="<html><body>Mantenimiento</body></html>")
+    with patch.object(ideam_cap, "_get", new=AsyncMock(return_value=html)), patch.object(
+        avisos_ext.asyncio, "sleep", new=AsyncMock()
+    ):
+        assert asyncio.run(ideam_cap.get_alertas_ideam()) == (None, "sin_dato")
+    avisos_ext._cache.pop("ideam_cap", None)
+
+
+def test_xweather_cuota_guard_y_reinicio():
+    from app.core.config import settings
+    from app.services.ingestion import avisos_ext
+
+    viejo = (settings.xweather_client_id, settings.xweather_client_secret, dict(avisos_ext.xweather_cuota))
+    try:
+        settings.xweather_client_id, settings.xweather_client_secret = "id", "secret"
+        avisos_ext.xweather_cuota.update(restante=10, reinicia="Mon, 23 Nov 2099 00:00:00 GMT")
+        assert not avisos_ext.xweather_configurado()  # bajo la reserva: no gastar lo del radar
+        avisos_ext.xweather_cuota.update(restante=10, reinicia="Mon, 23 Nov 2020 00:00:00 GMT")
+        assert avisos_ext.xweather_configurado()  # el periodo ya reinició
+        avisos_ext._leer_cuota({}, agotada=True)  # 429 sin headers
+        assert not avisos_ext.xweather_configurado()
+    finally:
+        settings.xweather_client_id, settings.xweather_client_secret = viejo[0], viejo[1]
+        avisos_ext.xweather_cuota.clear()
+        avisos_ext.xweather_cuota.update(viejo[2])

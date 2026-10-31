@@ -160,14 +160,17 @@ async def handle_incoming_text(
     if text_lower in {"hola", "buenas", "hi", "start"}:
         avisos = avisos_para_pescador(get_avisos_cacheados(), solo_alertas=True)
         reply = f"{_SALUDO}\n\n{avisos}" if avisos else _SALUDO
+    elif ("alerta" in text_lower or "aviso" in text_lower) and (
+        # "no" como palabra: "pronostico" o "anoche" también contienen "no".
+        re.search(r"\bno\b", text_lower) or "desactiv" in text_lower or "baja" in text_lower
+    ):
+        user.alertas_activas = False
+        await db.commit()
+        reply = "Listo, ya no recibirás alertas automáticas."
     elif any(k in text_lower for k in ("aviso", "pronóstico", "pronostico")):
         reply = avisos_para_pescador(get_avisos_cacheados())
     elif "condici" in text_lower or "agua" in text_lower:
         reply = await _condicion_actual(db)
-    elif "alerta" in text_lower and ("no" in text_lower or "desactiv" in text_lower or "baja" in text_lower):
-        user.alertas_activas = False
-        await db.commit()
-        reply = "Listo, ya no recibirás alertas automáticas."
     elif "alerta" in text_lower:
         user.alertas_activas = True
         await db.commit()

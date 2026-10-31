@@ -189,3 +189,15 @@ def test_saludo_agrega_solo_avisos_confirmados():
     reply = mock_send.call_args.args[1]
     assert "CienaRed" in reply and "💨 Viento fuerte" in reply
     assert "Alerta IDEAM" not in reply  # la alerta fija de sep-2026 ya no se muestra
+
+
+def test_no_mas_avisos_da_de_baja_y_pronostico_no():
+    for texto, activas in (("no me manden más avisos", False), ("avisos del pronostico", True)):
+        db = _make_db()
+        with (
+            patch("app.services.message_router.get_avisos_cacheados", return_value=_avisos_alto()),
+            patch("app.services.message_router.whatsapp_service.send_text_message", new_callable=AsyncMock, return_value=None),
+        ):
+            asyncio.run(handle_incoming_text("+570000000", "Ana", texto, "wamid.in", db))
+        user = next(c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], User))
+        assert (user.alertas_activas is not False) == activas, texto

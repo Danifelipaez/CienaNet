@@ -106,13 +106,15 @@ def avisos_ciclon(ciclones: list[dict]) -> list[dict]:
 
 def aviso_frente_frio(sinoptico: dict, ahora: datetime) -> dict | None:
     """Frente frío nombrado en las secciones del Caribe del TWD. Empuja solo si el NHC
-    lo ubica sobre Colombia / SW del Caribe (afecta_cgsm); si no, el viento y el oleaje
-    que traiga los avisa el consenso de modelos."""
+    ubica EL FRENTE sobre Colombia / SW del Caribe (`afectan`; `afecta_cgsm` es True
+    también por una onda o vaguada cercana); si no, el viento y el oleaje que traiga
+    los avisa el consenso de modelos."""
     if "frente_frio" not in (sinoptico.get("sistemas") or []):
         return None
     anio, semana, _ = ahora.astimezone(BOGOTA).isocalendar()
     return aviso(
-        "frente_frio", "alto" if sinoptico.get("afecta_cgsm") else "medio", "Frente frío en el Caribe",
+        "frente_frio", "alto" if "frente_frio" in (sinoptico.get("afectan") or []) else "medio",
+        "Frente frío en el Caribe",
         "🌬️ Un frente frío avanza por el Caribe: en los próximos días puede traer brisa fuerte del "
         "norte y mar de leva. Revisa el pronóstico antes de salir.",
         # Clave semanal: el TWD sale cada 6 h y un frente dura días.

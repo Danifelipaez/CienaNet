@@ -8,6 +8,7 @@ se filtra por nombre y no por punto-en-polígono) y las zonas hidrográficas que
 drenan a la ciénaga. Deslizamientos e incendios (terrestres) se descartan.
 """
 
+import asyncio
 import logging
 import xml.etree.ElementTree as ET
 
@@ -62,16 +63,28 @@ async def get_alertas_ideam() -> tuple[list[dict] | None, str]:
 
     async def fetch() -> list[dict]:
         feed = feedparser.parse((await _get(FEED_URL)).text)
-        if feed.bozo and not feed.entries:
-            raise ValueError("índice CAP del IDEAM ilegible")
-        alertas = []
+        # Una página de mantenimiento con HTTP 200 parsea como feed vacío: sin esto se
+        # leería como "IDEAM revisado, sin alertas" en vez de "no se pudo revisar".
+        if not (feed.version or "").startswith("atom") or "ideam" not in (feed.feed.get("title") or "").lower():
+            raise ValueError("la respuesta no es el índice Atom de alertas del IDEAM")
+        candidatas = []
         for e in feed.entries:
             zona = zona_de(f"{e.get('title', '')} {e.get('summary', '')}")
             href = next((lk.get("href") for lk in e.get("links", []) if lk.get("type") == "application/cap+xml"), None)
-            if zona is None or not href:
-                continue
-            cap = parse_cap((await _get(href)).text)
-            alertas.append({**cap, "tipo": zona[0], "zona": zona[1]})
+            if zona is not None and href:
+                candidatas.append((zona, href))
+
+        async def detalle(href: str) -> dict:
+            return parse_cap((await _get(href)).text)
+
+        caps = await asyncio.gather(*(detalle(h) for _, h in candidatas), return_exceptions=True)
+        alertas = [{**c, "tipo": z[0], "zona": z[1]} for (z, _), c in zip(candidatas, caps) if isinstance(c, dict)]
+        fallidas = len(candidatas) - len(alertas)
+        if fallidas:
+            # Una alerta perdida no tumba las demás; si fallan todas, la fuente cuenta como caída.
+            logger.warning("IDEAM CAP: %d de %d alertas de la zona no se pudieron leer", fallidas, len(candidatas))
+            if not alertas:
+                raise ValueError("ninguna alerta CAP de la zona se pudo leer")
         return alertas
 
     return await _con_cache("ideam_cap", 900.0, 6 * 3600.0, fetch)
